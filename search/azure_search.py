@@ -1,0 +1,369 @@
+"""
+Azure AI Search integration for vector search capabilities.
+"""
+import json
+import logging
+import time
+from typing import List, Dict, Any, Optional, Union
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import (
+    SearchIndex, SimpleField, SearchableField, SearchField,
+    VectorSearch, VectorSearchProfile, HnswParameters,
+    VectorSearchAlgorithmKind, VectorSearchAlgorithmMetric
+)
+from config.config import (
+    AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME,
+    AZURE_OPENAI_EMBEDDING_DIMENSION, VECTOR_SEARCH_TOP_K,
+    VECTOR_SEARCH_SCORE_THRESHOLD, HYBRID_SEARCH_ENABLED
+)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class AzureSearchClient:
+    """Client for interacting with Azure AI Search for vector search."""
+    
+    def __init__(self, endpoint: str = AZURE_SEARCH_ENDPOINT, 
+                api_key: str = AZURE_SEARCH_KEY,
+                index_name: str = AZURE_SEARCH_INDEX_NAME,
+                embedding_dimension: int = AZURE_OPENAI_EMBEDDING_DIMENSION):
+        """
+        Initialize Azure AI Search client.
+        
+        Args:
+            endpoint: Azure AI Search endpoint
+            api_key: Azure AI Search API key
+            index_name: Name of the search index
+            embedding_dimension: Dimension of the embedding vectors
+        """
+        self.endpoint = endpoint
+        self.api_key = api_key
+        self.index_name = index_name
+        self.embedding_dimension = embedding_dimension
+        
+        # Initialize clients
+        if self.endpoint and self.api_key:
+            self.credential = AzureKeyCredential(self.api_key)
+            self.index_client = SearchIndexClient(
+                endpoint=self.endpoint,
+                credential=self.credential
+            )
+            self.search_client = SearchClient(
+                endpoint=self.endpoint,
+                index_name=self.index_name,
+                credential=self.credential
+            )
+            logger.info(f"Initialized Azure AI Search clients for endpoint: {self.endpoint}")
+        else:
+            logger.warning("Azure AI Search credentials not provided. Vector search will fail.")
+            self.credential = None
+            self.index_client = None
+            self.search_client = None
+    
+    def create_search_index(self) -> bool:
+        """
+        Create search index with vector search capabilities.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.index_client:
+            logger.error("Azure AI Search credentials not provided. Cannot create index.")
+            return False
+        
+        try:
+            # Check if index already exists
+            if self.index_name in [index.name for index in self.index_client.list_indexes()]:
+                logger.info(f"Index {self.index_name} already exists")
+                return True
+            
+            # Define fields
+            fields = [
+                # ID field
+                SimpleField(name="id", type="Edm.String", key=True, filterable=True),
+                
+                # Content field
+                SearchableField(name="content", type="Edm.String", analyzer_name="en.microsoft"),
+                
+                # Vector embedding field
+                SearchField(
+                    name="embedding",
+                    type="Collection(Edm.Single)",
+                    vector_search_dimensions=self.embedding_dimension,
+                    vector_search_profile_name="default"
+                ),
+                
+                # Metadata fields
+                SimpleField(name="chunk_id", type="Edm.String", filterable=True),
+                SimpleField(name="chunk_index", type="Edm.Int32", filterable=True, sortable=True),
+                SimpleField(name="entity_type", type="Edm.String", filterable=True),
+                SimpleField(name="source_type", type="Edm.String", filterable=True),
+                SimpleField(name="source_id", type="Edm.String", filterable=True),
+                SimpleField(name="content_type", type="Edm.String", filterable=True),
+                
+                # Common metadata fields
+                SearchableField(name="title", type="Edm.String", analyzer_name="en.microsoft"),
+                SimpleField(name="created_at", type="Edm.DateTimeOffset", filterable=True, sortable=True),
+                SimpleField(name="updated_at", type="Edm.DateTimeOffset", filterable=True, sortable=True),
+                SimpleField(name="author_username", type="Edm.String", filterable=True),
+                SimpleField(name="author_name", type="Edm.String", filterable=True),
+                
+                # Entity-specific fields
+                SimpleField(name="state", type="Edm.String", filterable=True),
+                SearchableField(name="labels", type="Collection(Edm.String)", filterable=True),
+                SimpleField(name="assignee_usernames", type="Collection(Edm.String)", filterable=True),
+                SimpleField(name="milestone_title", type="Edm.String", filterable=True),
+                SimpleField(name="source_branch", type="Edm.String", filterable=True),
+                SimpleField(name="target_branch", type="Edm.String", filterable=True),
+                SimpleField(name="path", type="Edm.String", filterable=True),
+                SimpleField(name="name", type="Edm.String", filterable=True),
+                SimpleField(name="ref", type="Edm.String", filterable=True),
+                SimpleField(name="language", type="Edm.String", filterable=True),
+                SimpleField(name="code_unit_type", type="Edm.String", filterable=True),
+                SimpleField(name="code_unit_name", type="Edm.String", filterable=True),
+                SimpleField(name="gitlab_url", type="Edm.String"),
+                
+                # Additional metadata as JSON
+                SimpleField(name="metadata_json", type="Edm.String")
+            ]
+            
+            # Define vector search
+            vector_search = VectorSearch(
+                algorithms=[
+                    {
+                        "name": "default-hnsw",
+                        "kind": VectorSearchAlgorithmKind.HNSW,
+                        "parameters": HnswParameters(
+                            m=4,
+                            ef_construction=400,
+                            ef_search=500,
+                            metric=VectorSearchAlgorithmMetric.COSINE
+                        )
+                    }
+                ],
+                profiles=[
+                    VectorSearchProfile(
+                        name="default",
+                        algorithm_configuration_name="default-hnsw"
+                    )
+                ]
+            )
+            
+            # Define semantic search
+            semantic_search = SemanticSearch(
+                configurations=[
+                    SemanticConfiguration(
+                        name="default-semantic-config",
+                        prioritized_fields=SemanticField(
+                            title_field=None,
+                            content_fields=["content"],
+                            keyword_fields=["title", "labels"]
+                        )
+                    )
+                ]
+            )
+            
+            # Create index
+            index = SearchIndex(
+                name=self.index_name,
+                fields=fields,
+                vector_search=vector_search,
+                semantic_search=semantic_search
+            )
+            
+            self.index_client.create_index(index)
+            logger.info(f"Created search index: {self.index_name}")
+            
+            # Wait for index to be ready
+            time.sleep(5)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating search index: {str(e)}")
+            return False
+    
+    def index_chunks(self, chunks: List[Dict[str, Any]], batch_size: int = 100) -> bool:
+        """
+        Index chunks in Azure AI Search.
+        
+        Args:
+            chunks: List of chunks with content, metadata, and embeddings
+            batch_size: Number of chunks to index in each batch
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.search_client:
+            logger.error("Azure AI Search credentials not provided. Cannot index chunks.")
+            return False
+        
+        try:
+            # Ensure index exists
+            if not self.create_search_index():
+                logger.error("Failed to create search index")
+                return False
+            
+            # Prepare documents for indexing
+            documents = []
+            for i, chunk in enumerate(chunks):
+                # Extract content and embedding
+                content = chunk.get('content', '')
+                embedding = chunk.get('embedding', [])
+                
+                if not content or not embedding:
+                    logger.warning(f"Skipping chunk {i} due to missing content or embedding")
+                    continue
+                
+                # Extract metadata
+                metadata = chunk.get('metadata', {})
+                
+                # Create document
+                document = {
+                    "id": metadata.get('chunk_id', f"chunk_{i}"),
+                    "content": content,
+                    "embedding": embedding
+                }
+                
+                # Add metadata fields
+                for key, value in metadata.items():
+                    if key in [
+                        "chunk_id", "chunk_index", "entity_type", "source_type", "source_id",
+                        "content_type", "title", "created_at", "updated_at", "author_username",
+                        "author_name", "state", "labels", "assignee_usernames", "milestone_title",
+                        "source_branch", "target_branch", "path", "name", "ref", "language",
+                        "code_unit_type", "code_unit_name", "gitlab_url"
+                    ]:
+                        document[key] = value
+                
+                # Store remaining metadata as JSON
+                remaining_metadata = {k: v for k, v in metadata.items() if k not in document}
+                if remaining_metadata:
+                    document["metadata_json"] = json.dumps(remaining_metadata)
+                
+                documents.append(document)
+            
+            # Index documents in batches
+            total_batches = (len(documents) + batch_size - 1) // batch_size
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i+batch_size]
+                
+                try:
+                    self.search_client.upload_documents(batch)
+                    logger.info(f"Indexed batch {i//batch_size + 1}/{total_batches} ({len(batch)} documents)")
+                except Exception as e:
+                    logger.error(f"Error indexing batch {i//batch_size + 1}: {str(e)}")
+            
+            logger.info(f"Indexed {len(documents)} documents in {total_batches} batches")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error indexing chunks: {str(e)}")
+            return False
+    
+    def search(self, query: str, embedding: List[float], 
+              filters: Dict[str, Any] = None, top_k: int = VECTOR_SEARCH_TOP_K,
+              score_threshold: float = VECTOR_SEARCH_SCORE_THRESHOLD,
+              hybrid_search: bool = HYBRID_SEARCH_ENABLED) -> List[Dict[str, Any]]:
+        """
+        Search for relevant chunks using vector search.
+        
+        Args:
+            query: Query text
+            embedding: Query embedding vector
+            filters: Filters to apply to search
+            top_k: Number of results to return
+            score_threshold: Minimum score threshold for results
+            hybrid_search: Whether to use hybrid search (vector + keyword)
+            
+        Returns:
+            List of search results
+        """
+        if not self.search_client:
+            logger.error("Azure AI Search credentials not provided. Cannot perform search.")
+            return []
+        
+        try:
+            # Prepare filter string
+            filter_str = None
+            if filters:
+                filter_parts = []
+                for key, value in filters.items():
+                    if isinstance(value, list):
+                        # Handle list values (OR condition)
+                        or_parts = [f"{key} eq '{v}'" for v in value]
+                        filter_parts.append(f"({' or '.join(or_parts)})")
+                    else:
+                        # Handle single values
+                        filter_parts.append(f"{key} eq '{value}'")
+                
+                if filter_parts:
+                    filter_str = " and ".join(filter_parts)
+            
+            # Perform search
+            if hybrid_search:
+                # Hybrid search (vector + keyword)
+                search_results = self.search_client.search(
+                    search_text=query,
+                    vector={"embedding": embedding, "k": top_k, "fields": "embedding"},
+                    filter=filter_str,
+                    top=top_k,
+                    include_total_count=True,
+                    semantic_configuration_name="default-semantic-config" if query else None
+                )
+            else:
+                # Pure vector search
+                search_results = self.search_client.search(
+                    search_text=None,
+                    vector={"embedding": embedding, "k": top_k, "fields": "embedding"},
+                    filter=filter_str,
+                    top=top_k,
+                    include_total_count=True
+                )
+            
+            # Process results
+            results = []
+            for result in search_results:
+                # Skip results below threshold
+                score = result.get('@search.score', 0)
+                if score < score_threshold:
+                    continue
+                
+                # Extract document fields
+                document = {
+                    "id": result.get('id'),
+                    "content": result.get('content'),
+                    "score": score
+                }
+                
+                # Extract metadata fields
+                for key in [
+                    "chunk_id", "chunk_index", "entity_type", "source_type", "source_id",
+                    "content_type", "title", "created_at", "updated_at", "author_username",
+                    "author_name", "state", "labels", "assignee_usernames", "milestone_title",
+                    "source_branch", "target_branch", "path", "name", "ref", "language",
+                    "code_unit_type", "code_unit_name", "gitlab_url"
+                ]:
+                    if key in result:
+                        document[key] = result.get(key)
+                
+                # Extract additional metadata from JSON
+                metadata_json = result.get('metadata_json')
+                if metadata_json:
+                    try:
+                        additional_metadata = json.loads(metadata_json)
+                        document.update(additional_metadata)
+                    except Exception as e:
+                        logger.warning(f"Error parsing metadata JSON: {str(e)}")
+                
+                results.append(document)
+            
+            logger.info(f"Found {len(results)} results for query: {query}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error performing search: {str(e)}")
+            return []
