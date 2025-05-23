@@ -186,6 +186,10 @@ To extract data from multiple specific projects, use a comma-separated list of p
 
 ```bash
 python main.py --extract --project-id "12345,67890,54321"
+
+# Example:
+python main.py --extract --project-id "69861496"
+
 ```
 
 #### Extract from All Projects in Groups
@@ -232,6 +236,9 @@ To process and chunk the extracted data:
 
 ```bash
 python main.py --process --project-id your_project_id
+
+# Example:
+python main.py --process --project-id "69861496"
 ```
 
 For multiple projects:
@@ -276,7 +283,8 @@ python main.py --index --project-id your_project_id
 For multiple projects:
 
 ```bash
-python main.py --index --project-id "12345,67890"
+python main.py --index --project-id "12345,67890
+ 
 ```
 
 The system will:

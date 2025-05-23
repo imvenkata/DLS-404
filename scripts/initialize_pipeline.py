@@ -12,8 +12,12 @@ from extractors.merge_requests_extractor import MergeRequestsExtractor
 from extractors.commits_extractor import CommitsExtractor
 from extractors.code_extractor import CodeExtractor
 from extractors.gitlab_extractor import GitLabExtractor
+# Import original chunkers
 from processors.text_chunker import TextChunker
 from processors.code_chunker import CodeChunker
+# Import improved chunkers
+from processors.improved_text_chunker import ImprovedTextChunker
+from processors.improved_code_chunker import ImprovedCodeChunker
 from processors.embeddings_generator import EmbeddingsGenerator
 from storage.blob_storage import BlobStorage
 from search.azure_search import AzureSearchClient
@@ -179,9 +183,12 @@ def process_chunks(project_ids: Union[str, List[str]]):
     # Initialize storage
     blob_storage = BlobStorage()
     
-    # Initialize chunkers
-    text_chunker = TextChunker()
-    code_chunker = CodeChunker()
+    # Initialize improved chunkers
+    text_chunker = ImprovedTextChunker()
+    code_chunker = ImprovedCodeChunker()
+    
+    # Log that we're using improved chunkers
+    logger.info("Using improved chunkers with logical IDs and indices")
     
     # Convert string IDs to lists if needed
     if isinstance(project_ids, str):
@@ -305,13 +312,40 @@ def process_chunks(project_ids: Union[str, List[str]]):
                     if 'content' in file and file['content']:
                         metadata = file['metadata'].copy()
                         
+                        # Add debug logging to see what metadata we have
+                        logger.info(f"File metadata: {metadata}")
+                        
+                        # Get file extension for better language detection
+                        file_path = metadata.get('path', '')
+                        extension = file_path.split('.')[-1].lower() if '.' in file_path else ''
+                        
+                        # Map file extensions to languages if not already set
+                        language_map = {
+                            'py': 'python',
+                            'js': 'javascript',
+                            'java': 'java',
+                            'cs': 'csharp',
+                            'jsx': 'javascript',
+                            'ts': 'javascript',
+                            'tsx': 'javascript'
+                        }
+                        
+                        # Use existing language or detect from extension
+                        language = metadata.get('language', language_map.get(extension, 'unknown'))
+                        metadata['language'] = language
+                        
+                        logger.info(f"Processing file {file_path} with language: {language}")
+                        
                         # Determine chunking method based on file type
-                        if metadata.get('language', '') in ['python', 'javascript', 'java', 'csharp']:
+                        if language in ['python', 'javascript', 'java', 'csharp']:
                             # Use code chunker for programming languages
+                            logger.info(f"Using code chunker for {file_path}")
                             code_chunks = code_chunker.chunk_code(file['content'], metadata)
+                            logger.info(f"Generated {len(code_chunks)} code chunks for {file_path}")
                             all_chunks.extend(code_chunks)
                         else:
                             # Use text chunker for other file types
+                            logger.info(f"Using text chunker for {file_path}")
                             text_chunks = text_chunker.chunk_text(file['content'], metadata)
                             all_chunks.extend(text_chunks)
         except Exception as e:

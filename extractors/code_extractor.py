@@ -44,10 +44,26 @@ class CodeExtractor(GitLabExtractor):
             
             # Get repository tree
             try:
+                # First try with the specified ref
                 items = project.repository_tree(path=path, ref=ref, recursive=True, all=True)
             except Exception as e:
-                logger.error(f"Failed to get repository tree for project {project_id}: {str(e)}")
-                return []
+                logger.warning(f"Failed to get repository tree for project {project_id} with ref '{ref}': {str(e)}")
+                # If that fails, try to get the default branch
+                try:
+                    default_branch = project.default_branch
+                    logger.info(f"Trying with default branch: {default_branch}")
+                    if default_branch:
+                        try:
+                            items = project.repository_tree(path=path, ref=default_branch, recursive=True, all=True)
+                        except Exception as e2:
+                            logger.error(f"Failed to get repository tree for project {project_id} with default branch '{default_branch}': {str(e2)}")
+                            return []
+                    else:
+                        logger.error(f"No default branch found for project {project_id}")
+                        return []
+                except Exception as e3:
+                    logger.error(f"Failed to get default branch for project {project_id}: {str(e3)}")
+                    return []
             
             for item in items:
                 if item['type'] == 'blob':  # Only process files, not directories
@@ -60,30 +76,46 @@ class CodeExtractor(GitLabExtractor):
                     
                     try:
                         # Get file content
-                        file_content = project.files.get(file_path=file_path, ref=ref)
-                        
                         try:
-                            # Get the content directly as text
-                            content = file_content.decode()
-                        except Exception as e:
-                            # If decode fails, try to get the raw content as bytes
+                            # Try to get file content with the specified ref first
                             try:
-                                # Get raw content as bytes
-                                raw_bytes = file_content.content
+                                file_content = project.files.get(file_path=file_path, ref=ref)
+                            except Exception as ref_e:
+                                # If that fails, try with the default branch
+                                logger.warning(f"Failed to get file with ref '{ref}': {str(ref_e)}")
+                                default_branch = project.default_branch
+                                if default_branch and default_branch != ref:
+                                    logger.info(f"Trying to get file with default branch: {default_branch}")
+                                    file_content = project.files.get(file_path=file_path, ref=default_branch)
+                                else:
+                                    # Try with the master branch as a last resort
+                                    logger.info("Trying to get file with 'master' branch")
+                                    file_content = project.files.get(file_path=file_path, ref='master')
+                            
+                            # The python-gitlab API returns file content in base64 format
+                            # We need to get the content and decode it from base64
+                            try:
+                                # Get the content as base64 and decode it
+                                content_base64 = file_content.content
+                                # Decode from base64
+                                content_bytes = base64.b64decode(content_base64)
                                 # Try to decode as UTF-8
                                 try:
-                                    content = raw_bytes.decode('utf-8') if isinstance(raw_bytes, bytes) else str(raw_bytes)
+                                    content = content_bytes.decode('utf-8')
                                 except UnicodeDecodeError:
                                     # If UTF-8 fails, try Latin-1 as it can decode any byte sequence
                                     try:
-                                        content = raw_bytes.decode('latin-1') if isinstance(raw_bytes, bytes) else str(raw_bytes)
+                                        content = content_bytes.decode('latin-1')
                                     except Exception:
                                         # Last resort: just use an empty string
                                         content = ""
                                         logger.warning(f"Could not decode content for file {file_path}")
                             except Exception as inner_e:
-                                logger.warning(f"Error processing file content: {str(e)} -> {str(inner_e)}")
+                                logger.error(f"Error decoding file content for {file_path}: {str(inner_e)}")
                                 content = ""
+                        except Exception as e:
+                            logger.error(f"Failed to get file content for {file_path}: {str(e)}")
+                            content = ""
                         
                         file_data = {
                             'path': file_path,

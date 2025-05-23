@@ -1,8 +1,9 @@
 """
-Text chunker for breaking down text content into semantic chunks.
+Improved text chunker for breaking down text content into semantic chunks with logical IDs.
 """
 import re
 import logging
+import hashlib
 from typing import List, Dict, Any, Optional
 from config.config import TEXT_CHUNK_SIZE, TEXT_CHUNK_OVERLAP
 
@@ -10,8 +11,8 @@ from config.config import TEXT_CHUNK_SIZE, TEXT_CHUNK_OVERLAP
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class TextChunker:
-    """Class for chunking text content into semantic units."""
+class ImprovedTextChunker:
+    """Class for chunking text content into semantic units with logical IDs."""
     
     def __init__(self, max_chunk_size: int = TEXT_CHUNK_SIZE, 
                 chunk_overlap: int = TEXT_CHUNK_OVERLAP):
@@ -24,6 +25,56 @@ class TextChunker:
         """
         self.max_chunk_size = max_chunk_size
         self.chunk_overlap = chunk_overlap
+    
+    def _generate_chunk_id(self, metadata: Dict[str, Any], chunk_index: int, content_preview: str = None) -> str:
+        """
+        Generate a logical and descriptive chunk ID.
+        
+        Args:
+            metadata: Metadata associated with the chunk
+            chunk_index: Index of the chunk
+            content_preview: Preview of the chunk content (optional)
+            
+        Returns:
+            A logical and descriptive chunk ID
+        """
+        # Extract key metadata fields
+        entity_type = metadata.get('entity_type', '')
+        entity_id = metadata.get('id', '')
+        content_type = metadata.get('content_type', '')
+        title = metadata.get('title', '')
+        
+        # Extract project ID if available
+        project_id = metadata.get('source_id', '')
+        if not project_id and 'gitlab_url' in metadata:
+            # Try to extract project ID from GitLab URL
+            url = metadata.get('gitlab_url', '')
+            if '/projects/' in url:
+                project_id = url.split('/projects/')[1].split('/')[0]
+        
+        # Create a logical ID based on entity type and content
+        if entity_type and entity_id:
+            # For issues, merge requests, commits, etc.
+            if title:
+                # Create a slug from the title (first 30 chars)
+                title_slug = re.sub(r'[^a-zA-Z0-9]', '_', title[:30])
+                base_id = f"{entity_type}_{project_id}_{entity_id}_{content_type}_{title_slug}"
+            else:
+                base_id = f"{entity_type}_{project_id}_{entity_id}_{content_type}"
+                
+            # Add content hash if content preview is provided
+            if content_preview:
+                content_hash = hashlib.md5(content_preview.encode()).hexdigest()[:8]
+                chunk_id = f"{base_id}_{content_hash}_{chunk_index}"
+            else:
+                chunk_id = f"{base_id}_{chunk_index}"
+        else:
+            # Fallback to a simpler ID
+            chunk_id = f"text_{project_id}_{entity_type}_{chunk_index}"
+        
+        # Clean up the chunk ID to remove any invalid characters
+        chunk_id = re.sub(r'[^a-zA-Z0-9_-]', '_', chunk_id)
+        return chunk_id
     
     def chunk_text(self, text: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -76,36 +127,14 @@ class TextChunker:
                 # Create a chunk from accumulated sentences
                 chunk_text = ' '.join(current_chunk)
                 
-                # Create a more descriptive chunk ID
-                entity_type = metadata.get('entity_type', '')
-                entity_id = metadata.get('id', '')
-                content_type = metadata.get('content_type', '')
-                title = metadata.get('title', '')
+                # Generate a logical chunk ID
+                chunk_id = self._generate_chunk_id(
+                    metadata, 
+                    len(chunks), 
+                    chunk_text[:50]  # Use first 50 chars as content preview
+                )
                 
-                # Extract project ID if available
-                project_id = metadata.get('source_id', '')
-                if not project_id and 'gitlab_url' in metadata:
-                    # Try to extract project ID from GitLab URL
-                    url = metadata.get('gitlab_url', '')
-                    if '/projects/' in url:
-                        project_id = url.split('/projects/')[1].split('/')[0]
-                
-                # Create a logical ID based on entity type and content
-                if entity_type and entity_id and content_type:
-                    # For issues, merge requests, commits, etc.
-                    title_slug = re.sub(r'[^a-zA-Z0-9]', '_', title[:30]) if title else ''
-                    if title_slug:
-                        chunk_id = f"{entity_type}_{project_id}_{entity_id}_{content_type}_{title_slug}_{len(chunks)}"
-                    else:
-                        chunk_id = f"{entity_type}_{project_id}_{entity_id}_{content_type}_{len(chunks)}"
-                else:
-                    # Fallback to a simpler ID
-                    chunk_id = f"text_{project_id}_{entity_type}_{len(chunks)}"
-                
-                # Clean up the chunk ID to remove any invalid characters
-                chunk_id = re.sub(r'[^a-zA-Z0-9_-]', '_', chunk_id)
-                
-                # Calculate a logical chunk index that keeps related content together
+                # Calculate a logical chunk index
                 chunk_index = len(chunks)
                 
                 chunk_metadata = metadata.copy()
@@ -130,12 +159,21 @@ class TextChunker:
         # Add the last chunk if there's anything left
         if current_chunk:
             chunk_text = ' '.join(current_chunk)
-            chunk_id = f"{metadata.get('source_type', 'text')}_{metadata.get('source_id', 'unknown')}_{len(chunks)}"
+            
+            # Generate a logical chunk ID
+            chunk_id = self._generate_chunk_id(
+                metadata, 
+                len(chunks), 
+                chunk_text[:50]  # Use first 50 chars as content preview
+            )
+            
+            # Calculate a logical chunk index
+            chunk_index = len(chunks)
             
             chunk_metadata = metadata.copy()
             chunk_metadata.update({
                 'chunk_id': chunk_id,
-                'chunk_index': len(chunks)
+                'chunk_index': chunk_index
             })
             
             chunks.append({
@@ -173,12 +211,21 @@ class TextChunker:
                 # Add any accumulated content as a chunk
                 if current_chunk:
                     chunk_text = ' '.join(current_chunk)
-                    chunk_id = f"{metadata.get('source_type', 'text')}_{metadata.get('source_id', 'unknown')}_{len(chunks)}"
+                    
+                    # Generate a logical chunk ID
+                    chunk_id = self._generate_chunk_id(
+                        metadata, 
+                        len(chunks), 
+                        chunk_text[:50]  # Use first 50 chars as content preview
+                    )
+                    
+                    # Calculate a logical chunk index
+                    chunk_index = len(chunks)
                     
                     chunk_metadata = metadata.copy()
                     chunk_metadata.update({
                         'chunk_id': chunk_id,
-                        'chunk_index': len(chunks)
+                        'chunk_index': chunk_index
                     })
                     
                     chunks.append({
@@ -194,8 +241,17 @@ class TextChunker:
                 
                 # Update chunk indices
                 for i, chunk in enumerate(paragraph_chunks):
-                    chunk['metadata']['chunk_index'] = len(chunks) + i
-                    chunk['metadata']['chunk_id'] = f"{metadata.get('source_type', 'text')}_{metadata.get('source_id', 'unknown')}_{len(chunks) + i}"
+                    new_index = len(chunks) + i
+                    
+                    # Generate a logical chunk ID
+                    chunk_id = self._generate_chunk_id(
+                        metadata, 
+                        new_index, 
+                        chunk['content'][:50]  # Use first 50 chars as content preview
+                    )
+                    
+                    chunk['metadata']['chunk_index'] = new_index
+                    chunk['metadata']['chunk_id'] = chunk_id
                 
                 chunks.extend(paragraph_chunks)
                 continue
@@ -203,12 +259,21 @@ class TextChunker:
             if current_size + paragraph_size > self.max_chunk_size and current_chunk:
                 # Create a chunk from accumulated paragraphs
                 chunk_text = ' '.join(current_chunk)
-                chunk_id = f"{metadata.get('source_type', 'text')}_{metadata.get('source_id', 'unknown')}_{len(chunks)}"
+                
+                # Generate a logical chunk ID
+                chunk_id = self._generate_chunk_id(
+                    metadata, 
+                    len(chunks), 
+                    chunk_text[:50]  # Use first 50 chars as content preview
+                )
+                
+                # Calculate a logical chunk index
+                chunk_index = len(chunks)
                 
                 chunk_metadata = metadata.copy()
                 chunk_metadata.update({
                     'chunk_id': chunk_id,
-                    'chunk_index': len(chunks)
+                    'chunk_index': chunk_index
                 })
                 
                 chunks.append({
@@ -227,12 +292,21 @@ class TextChunker:
         # Add the last chunk if there's anything left
         if current_chunk:
             chunk_text = ' '.join(current_chunk)
-            chunk_id = f"{metadata.get('source_type', 'text')}_{metadata.get('source_id', 'unknown')}_{len(chunks)}"
+            
+            # Generate a logical chunk ID
+            chunk_id = self._generate_chunk_id(
+                metadata, 
+                len(chunks), 
+                chunk_text[:50]  # Use first 50 chars as content preview
+            )
+            
+            # Calculate a logical chunk index
+            chunk_index = len(chunks)
             
             chunk_metadata = metadata.copy()
             chunk_metadata.update({
                 'chunk_id': chunk_id,
-                'chunk_index': len(chunks)
+                'chunk_index': chunk_index
             })
             
             chunks.append({
@@ -252,13 +326,19 @@ class TextChunker:
         Returns:
             List of sentences
         """
-        # Simple sentence splitting - in production, use a more sophisticated approach
-        # This handles common sentence endings but has limitations
-        sentence_endings = r'(?<=[.!?])\s+'
-        sentences = re.split(sentence_endings, text)
+        # Simple sentence splitting - not perfect but works for demonstration
+        # In production, use a more sophisticated NLP-based sentence splitter
         
-        # Filter out empty sentences
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Replace common abbreviations to avoid splitting at them
+        text = re.sub(r'(\b\w\.\w\.)', r'\1<POINT>', text)
+        text = re.sub(r'(\b\w\.\w\.)', r'\1<POINT>', text)
+        text = re.sub(r'(\b[A-Z]\.)(\s)', r'\1<POINT>\2', text)
+        
+        # Split at sentence boundaries
+        sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|\!)\s', text)
+        
+        # Restore abbreviations
+        sentences = [re.sub(r'<POINT>', '.', s) for s in sentences]
         
         return sentences
     
@@ -272,35 +352,10 @@ class TextChunker:
         Returns:
             List of paragraphs
         """
-        # Split by double newlines (common paragraph separator)
+        # Split at paragraph boundaries (double newlines)
         paragraphs = re.split(r'\n\s*\n', text)
         
-        # Filter out empty paragraphs
+        # Remove empty paragraphs and strip whitespace
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
         
         return paragraphs
-    
-    def preprocess_text(self, text: str) -> str:
-        """
-        Preprocess text by cleaning and normalizing.
-        
-        Args:
-            text: Text to preprocess
-            
-        Returns:
-            Preprocessed text
-        """
-        if not text:
-            return ""
-        
-        # Unescape HTML entities
-        import html
-        text = html.unescape(text)
-        
-        # Remove HTML tags
-        text = re.sub(r'<[^>]+>', ' ', text)
-        
-        # Remove extra whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        return text

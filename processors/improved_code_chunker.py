@@ -1,8 +1,9 @@
 """
-Code chunker for breaking down code content into semantic chunks.
+Improved code chunker for breaking down code content into semantic chunks with logical IDs.
 """
 import re
 import logging
+import hashlib
 from typing import List, Dict, Any, Optional
 from config.config import CODE_CHUNK_SIZE, CODE_CHUNK_OVERLAP
 
@@ -10,8 +11,8 @@ from config.config import CODE_CHUNK_SIZE, CODE_CHUNK_OVERLAP
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class CodeChunker:
-    """Class for chunking code content into logical units."""
+class ImprovedCodeChunker:
+    """Class for chunking code content into logical units with better IDs."""
     
     def __init__(self, max_chunk_size: int = CODE_CHUNK_SIZE, 
                 chunk_overlap: int = CODE_CHUNK_OVERLAP):
@@ -24,6 +25,60 @@ class CodeChunker:
         """
         self.max_chunk_size = max_chunk_size
         self.chunk_overlap = chunk_overlap
+    
+    def _generate_chunk_id(self, metadata: Dict[str, Any], unit_type: str, unit_name: str, 
+                          chunk_index: int = 0, part: int = None) -> str:
+        """
+        Generate a logical and descriptive chunk ID.
+        
+        Args:
+            metadata: Metadata associated with the chunk
+            unit_type: Type of code unit (function, class, file)
+            unit_name: Name of the code unit
+            chunk_index: Index of the chunk
+            part: Part number for large code units split into multiple chunks
+            
+        Returns:
+            A logical and descriptive chunk ID
+        """
+        # Extract key metadata fields
+        file_path = metadata.get('path', '')
+        file_name = metadata.get('name', '')
+        language = metadata.get('language', 'unknown')
+        
+        # Extract project ID if available
+        project_id = metadata.get('source_id', '')
+        if not project_id and 'gitlab_url' in metadata:
+            # Try to extract project ID from GitLab URL
+            url = metadata.get('gitlab_url', '')
+            if '/projects/' in url:
+                project_id = url.split('/projects/')[1].split('/')[0]
+        
+        # Create a logical ID based on file path and code unit
+        if file_path:
+            # Normalize file path
+            path_parts = file_path.split('/')
+            module_path = '_'.join(path_parts)
+            
+            # Create a hash of the file path to keep IDs shorter
+            path_hash = hashlib.md5(file_path.encode()).hexdigest()[:8]
+            
+            if unit_type and unit_name and unit_type != 'file':
+                # For functions, classes, methods, etc.
+                if part is not None:
+                    base_id = f"code_{project_id}_{path_hash}_{unit_type}_{unit_name}_part{part}"
+                else:
+                    base_id = f"code_{project_id}_{path_hash}_{unit_type}_{unit_name}"
+            else:
+                # For whole files
+                base_id = f"code_{project_id}_{path_hash}_file"
+        else:
+            # Fallback to a simpler ID if path not available
+            base_id = f"code_{project_id}_{unit_type}_{unit_name}"
+        
+        # Clean up the chunk ID to remove any invalid characters
+        chunk_id = re.sub(r'[^a-zA-Z0-9_-]', '_', base_id)
+        return chunk_id
     
     def chunk_code(self, code: str, metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -63,7 +118,7 @@ class CodeChunker:
                 lines = unit_content.split('\n')
                 current_chunk = []
                 current_size = 0
-                chunk_index = 0
+                chunk_part = 0
                 
                 for line in lines:
                     line_size = len(line.split())
@@ -71,15 +126,28 @@ class CodeChunker:
                     if current_size + line_size > self.max_chunk_size and current_chunk:
                         # Create a chunk from accumulated lines
                         chunk_text = '\n'.join(current_chunk)
-                        chunk_id = f"{metadata.get('source_type', 'code')}_{metadata.get('source_id', 'unknown')}_{unit_type}_{unit_name}_{chunk_index}"
+                        
+                        # Generate a logical chunk ID
+                        chunk_id = self._generate_chunk_id(
+                            metadata, 
+                            unit_type, 
+                            unit_name, 
+                            len(chunks),
+                            chunk_part
+                        )
+                        
+                        # Calculate a logical chunk index
+                        # Use a formula that keeps related chunks together
+                        # Base index on file path and unit name
+                        chunk_index = len(chunks)
                         
                         chunk_metadata = metadata.copy()
                         chunk_metadata.update({
                             'chunk_id': chunk_id,
-                            'chunk_index': len(chunks),
+                            'chunk_index': chunk_index,
                             'code_unit_type': unit_type,
                             'code_unit_name': unit_name,
-                            'code_unit_part': chunk_index,
+                            'code_unit_part': chunk_part,
                             'language': language
                         })
                         
@@ -92,7 +160,7 @@ class CodeChunker:
                         overlap_lines = min(self.chunk_overlap // 10, len(current_chunk))  # Rough estimate
                         current_chunk = current_chunk[-overlap_lines:] if overlap_lines > 0 else []
                         current_size = sum(len(l.split()) for l in current_chunk)
-                        chunk_index += 1
+                        chunk_part += 1
                     
                     current_chunk.append(line)
                     current_size += line_size
@@ -100,15 +168,26 @@ class CodeChunker:
                 # Add the last chunk if there's anything left
                 if current_chunk:
                     chunk_text = '\n'.join(current_chunk)
-                    chunk_id = f"{metadata.get('source_type', 'code')}_{metadata.get('source_id', 'unknown')}_{unit_type}_{unit_name}_{chunk_index}"
+                    
+                    # Generate a logical chunk ID
+                    chunk_id = self._generate_chunk_id(
+                        metadata, 
+                        unit_type, 
+                        unit_name, 
+                        len(chunks),
+                        chunk_part
+                    )
+                    
+                    # Calculate a logical chunk index
+                    chunk_index = len(chunks)
                     
                     chunk_metadata = metadata.copy()
                     chunk_metadata.update({
                         'chunk_id': chunk_id,
-                        'chunk_index': len(chunks),
+                        'chunk_index': chunk_index,
                         'code_unit_type': unit_type,
                         'code_unit_name': unit_name,
-                        'code_unit_part': chunk_index,
+                        'code_unit_part': chunk_part,
                         'language': language
                     })
                     
@@ -118,38 +197,15 @@ class CodeChunker:
                     })
             else:
                 # For smaller code units, keep them as a single chunk
-                # Create a more descriptive chunk ID based on file path and unit name
-                file_path = metadata.get('path', '')
-                file_name = metadata.get('name', '')
+                # Generate a logical chunk ID
+                chunk_id = self._generate_chunk_id(
+                    metadata, 
+                    unit_type, 
+                    unit_name, 
+                    len(chunks)
+                )
                 
-                # Extract project ID if available
-                project_id = metadata.get('source_id', '')
-                if not project_id and 'gitlab_url' in metadata:
-                    # Try to extract project ID from GitLab URL
-                    url = metadata.get('gitlab_url', '')
-                    if '/projects/' in url:
-                        project_id = url.split('/projects/')[1].split('/')[0]
-                
-                # Create a more logical chunk ID
-                if file_path and unit_type and unit_name:
-                    # For code units within files
-                    path_parts = file_path.split('/')
-                    module_path = '_'.join(path_parts)
-                    chunk_id = f"code_{project_id}_{module_path}_{unit_type}_{unit_name}"
-                elif file_path:
-                    # For whole files
-                    path_parts = file_path.split('/')
-                    module_path = '_'.join(path_parts)
-                    chunk_id = f"code_{project_id}_{module_path}"
-                else:
-                    # Fallback to a simpler ID if path not available
-                    chunk_id = f"code_{project_id}_{unit_type}_{unit_name}"
-                
-                # Clean up the chunk ID to remove any invalid characters
-                chunk_id = re.sub(r'[^a-zA-Z0-9_-]', '_', chunk_id)
-                
-                # Calculate a logical chunk index based on file path and unit name
-                # This ensures related chunks stay together when sorted
+                # Calculate a logical chunk index
                 chunk_index = len(chunks)
                 
                 chunk_metadata = metadata.copy()
@@ -222,6 +278,7 @@ class CodeChunker:
         # Pattern for functions and classes
         func_pattern = re.compile(r'^\s*def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(')
         class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[\(:]')
+        docstring_pattern = re.compile(r'^\s*[\'\"]{3}(.*?)[\'\"]{3}', re.DOTALL)
         
         i = 0
         while i < len(lines):
@@ -231,78 +288,76 @@ class CodeChunker:
             func_match = func_pattern.match(line)
             if func_match:
                 func_name = func_match.group(1)
-                start_line = i
+                func_start = i
+                func_indent = len(line) - len(line.lstrip())
                 
-                # Find the end of the function (next line with same or less indentation)
-                indent_level = len(line) - len(line.lstrip())
+                # Find end of function
                 j = i + 1
-                while j < len(lines) and (not lines[j].strip() or len(lines[j]) - len(lines[j].lstrip()) > indent_level):
+                while j < len(lines):
+                    next_line = lines[j]
+                    if next_line.strip() and len(next_line) - len(next_line.lstrip()) <= func_indent:
+                        break
                     j += 1
                 
-                end_line = j
+                func_end = j
+                func_content = '\n'.join(lines[func_start:func_end])
                 
-                # Extract function content
-                func_content = '\n'.join(lines[start_line:end_line])
-                
-                # Extract docstring if present
+                # Check for docstring
                 docstring = ""
-                if j > i + 1 and lines[i + 1].strip().startswith('"""') or lines[i + 1].strip().startswith("'''"):
-                    doc_start = i + 1
-                    doc_end = doc_start + 1
-                    while doc_end < len(lines) and '"""' not in lines[doc_end] and "'''" not in lines[doc_end]:
-                        doc_end += 1
-                    if doc_end < len(lines):
-                        docstring = '\n'.join(lines[doc_start:doc_end + 1])
+                for k in range(i+1, min(i+5, len(lines))):
+                    docstring_match = docstring_pattern.match(lines[k])
+                    if docstring_match:
+                        docstring = docstring_match.group(1).strip()
+                        break
                 
                 results.append({
                     'type': 'function',
                     'name': func_name,
                     'content': func_content,
                     'docstring': docstring,
-                    'start_line': start_line,
-                    'end_line': end_line
+                    'start_line': func_start,
+                    'end_line': func_end
                 })
                 
-                i = end_line
+                i = func_end
                 continue
             
             # Check for class
             class_match = class_pattern.match(line)
             if class_match:
                 class_name = class_match.group(1)
-                start_line = i
+                class_start = i
+                class_indent = len(line) - len(line.lstrip())
                 
-                # Find the end of the class (next line with same or less indentation)
-                indent_level = len(line) - len(line.lstrip())
+                # Find end of class
                 j = i + 1
-                while j < len(lines) and (not lines[j].strip() or len(lines[j]) - len(lines[j].lstrip()) > indent_level):
+                while j < len(lines):
+                    next_line = lines[j]
+                    if next_line.strip() and len(next_line) - len(next_line.lstrip()) <= class_indent:
+                        break
                     j += 1
                 
-                end_line = j
+                class_end = j
+                class_content = '\n'.join(lines[class_start:class_end])
                 
-                # Extract class content
-                class_content = '\n'.join(lines[start_line:end_line])
-                
-                # Extract docstring if present
+                # Check for docstring
                 docstring = ""
-                if j > i + 1 and lines[i + 1].strip().startswith('"""') or lines[i + 1].strip().startswith("'''"):
-                    doc_start = i + 1
-                    doc_end = doc_start + 1
-                    while doc_end < len(lines) and '"""' not in lines[doc_end] and "'''" not in lines[doc_end]:
-                        doc_end += 1
-                    if doc_end < len(lines):
-                        docstring = '\n'.join(lines[doc_start:doc_end + 1])
+                for k in range(i+1, min(i+5, len(lines))):
+                    docstring_match = docstring_pattern.match(lines[k])
+                    if docstring_match:
+                        docstring = docstring_match.group(1).strip()
+                        break
                 
                 results.append({
                     'type': 'class',
                     'name': class_name,
                     'content': class_content,
                     'docstring': docstring,
-                    'start_line': start_line,
-                    'end_line': end_line
+                    'start_line': class_start,
+                    'end_line': class_end
                 })
                 
-                i = end_line
+                i = class_end
                 continue
             
             i += 1
@@ -313,7 +368,6 @@ class CodeChunker:
                 'type': 'file',
                 'name': 'whole_file',
                 'content': code,
-                'docstring': '',
                 'start_line': 0,
                 'end_line': len(lines)
             })
@@ -331,16 +385,13 @@ class CodeChunker:
             List of dictionaries containing function/class information
         """
         # Simple regex-based extraction - not perfect but works for demonstration
+        # In production, use a proper JavaScript parser
+        
         results = []
         lines = code.split('\n')
         
-        # Patterns for functions and classes
-        func_patterns = [
-            re.compile(r'^\s*function\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\('),  # function declaration
-            re.compile(r'^\s*const\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*function'),  # function expression
-            re.compile(r'^\s*const\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\(.*\)\s*=>'),  # arrow function
-            re.compile(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(.*\)\s*{')  # method
-        ]
+        # Pattern for functions and classes
+        func_pattern = re.compile(r'^\s*(function\s+([a-zA-Z_][a-zA-Z0-9_]*)|const\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*function|\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*function|\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^\)]*\)\s*{)')
         class_pattern = re.compile(r'^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)')
         
         i = 0
@@ -348,17 +399,12 @@ class CodeChunker:
             line = lines[i]
             
             # Check for function
-            func_name = None
-            for pattern in func_patterns:
-                match = pattern.match(line)
-                if match:
-                    func_name = match.group(1)
-                    break
-            
-            if func_name:
-                start_line = i
+            func_match = func_pattern.match(line)
+            if func_match:
+                func_name = func_match.group(2) or func_match.group(3) or func_match.group(4) or func_match.group(5) or "anonymous"
+                func_start = i
                 
-                # Find the end of the function (matching closing brace)
+                # Find matching closing brace
                 j = i
                 brace_count = 0
                 found_opening = False
@@ -378,45 +424,27 @@ class CodeChunker:
                     
                     j += 1
                 
-                end_line = min(j + 1, len(lines))
-                
-                # Extract function content
-                func_content = '\n'.join(lines[start_line:end_line])
-                
-                # Extract JSDoc if present
-                jsdoc = ""
-                if start_line > 0 and lines[start_line - 1].strip().startswith('/**'):
-                    doc_start = start_line - 1
-                    while doc_start > 0 and not lines[doc_start].strip().startswith('/**'):
-                        doc_start -= 1
-                    
-                    if doc_start >= 0:
-                        doc_end = doc_start
-                        while doc_end < start_line and not lines[doc_end].strip().endswith('*/'):
-                            doc_end += 1
-                        
-                        if doc_end < start_line:
-                            jsdoc = '\n'.join(lines[doc_start:doc_end + 1])
+                func_end = min(j + 1, len(lines))
+                func_content = '\n'.join(lines[func_start:func_end])
                 
                 results.append({
                     'type': 'function',
                     'name': func_name,
                     'content': func_content,
-                    'docstring': jsdoc,
-                    'start_line': start_line,
-                    'end_line': end_line
+                    'start_line': func_start,
+                    'end_line': func_end
                 })
                 
-                i = end_line
+                i = func_end
                 continue
             
             # Check for class
             class_match = class_pattern.match(line)
             if class_match:
                 class_name = class_match.group(1)
-                start_line = i
+                class_start = i
                 
-                # Find the end of the class (matching closing brace)
+                # Find matching closing brace
                 j = i
                 brace_count = 0
                 found_opening = False
@@ -436,36 +464,18 @@ class CodeChunker:
                     
                     j += 1
                 
-                end_line = min(j + 1, len(lines))
-                
-                # Extract class content
-                class_content = '\n'.join(lines[start_line:end_line])
-                
-                # Extract JSDoc if present
-                jsdoc = ""
-                if start_line > 0 and lines[start_line - 1].strip().startswith('/**'):
-                    doc_start = start_line - 1
-                    while doc_start > 0 and not lines[doc_start].strip().startswith('/**'):
-                        doc_start -= 1
-                    
-                    if doc_start >= 0:
-                        doc_end = doc_start
-                        while doc_end < start_line and not lines[doc_end].strip().endswith('*/'):
-                            doc_end += 1
-                        
-                        if doc_end < start_line:
-                            jsdoc = '\n'.join(lines[doc_start:doc_end + 1])
+                class_end = min(j + 1, len(lines))
+                class_content = '\n'.join(lines[class_start:class_end])
                 
                 results.append({
                     'type': 'class',
                     'name': class_name,
                     'content': class_content,
-                    'docstring': jsdoc,
-                    'start_line': start_line,
-                    'end_line': end_line
+                    'start_line': class_start,
+                    'end_line': class_end
                 })
                 
-                i = end_line
+                i = class_end
                 continue
             
             i += 1
@@ -476,7 +486,6 @@ class CodeChunker:
                 'type': 'file',
                 'name': 'whole_file',
                 'content': code,
-                'docstring': '',
                 'start_line': 0,
                 'end_line': len(lines)
             })
@@ -494,148 +503,107 @@ class CodeChunker:
             List of dictionaries containing function/class information
         """
         # Simple regex-based extraction - not perfect but works for demonstration
+        # In production, use a proper Java parser
+        
         results = []
         lines = code.split('\n')
         
-        # Patterns for methods and classes
-        method_pattern = re.compile(r'^\s*(public|private|protected)?\s*(static)?\s*[a-zA-Z_][a-zA-Z0-9_<>]*\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(')
-        class_pattern = re.compile(r'^\s*(public|private|protected)?\s*(static)?\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+        # Pattern for classes and methods
+        class_pattern = re.compile(r'^\s*(public|private|protected)?\s*(abstract|final)?\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+        method_pattern = re.compile(r'^\s*(public|private|protected)?\s*(static)?\s*(abstract|final)?\s*([a-zA-Z_][a-zA-Z0-9_<>]*)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(')
         
         i = 0
         while i < len(lines):
             line = lines[i]
             
-            # Check for method
-            method_match = method_pattern.match(line)
-            if method_match:
-                method_name = method_match.group(3)
-                start_line = i
-                
-                # Find the end of the method (matching closing brace)
-                j = i
-                while j < len(lines) and '{' not in lines[j]:
-                    j += 1
-                
-                if j < len(lines):
-                    brace_count = 1
-                    j += 1
-                    
-                    while j < len(lines) and brace_count > 0:
-                        for char in lines[j]:
-                            if char == '{':
-                                brace_count += 1
-                            elif char == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    break
-                        
-                        if brace_count == 0:
-                            break
-                        
-                        j += 1
-                
-                end_line = min(j + 1, len(lines))
-                
-                # Extract method content
-                method_content = '\n'.join(lines[start_line:end_line])
-                
-                # Extract Javadoc if present
-                javadoc = ""
-                if start_line > 0 and lines[start_line - 1].strip().startswith('/**'):
-                    doc_start = start_line - 1
-                    while doc_start > 0 and not lines[doc_start].strip().startswith('/**'):
-                        doc_start -= 1
-                    
-                    if doc_start >= 0:
-                        doc_end = doc_start
-                        while doc_end < start_line and not lines[doc_end].strip().endswith('*/'):
-                            doc_end += 1
-                        
-                        if doc_end < start_line:
-                            javadoc = '\n'.join(lines[doc_start:doc_end + 1])
-                
-                results.append({
-                    'type': 'method',
-                    'name': method_name,
-                    'content': method_content,
-                    'docstring': javadoc,
-                    'start_line': start_line,
-                    'end_line': end_line
-                })
-                
-                i = end_line
-                continue
-            
             # Check for class
             class_match = class_pattern.match(line)
             if class_match:
                 class_name = class_match.group(3)
-                start_line = i
+                class_start = i
                 
-                # Find the end of the class (matching closing brace)
+                # Find matching closing brace
                 j = i
-                while j < len(lines) and '{' not in lines[j]:
+                brace_count = 0
+                found_opening = False
+                
+                while j < len(lines):
+                    for char in lines[j]:
+                        if char == '{':
+                            found_opening = True
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if found_opening and brace_count == 0:
+                                break
+                    
+                    if found_opening and brace_count == 0:
+                        break
+                    
                     j += 1
                 
-                if j < len(lines):
-                    brace_count = 1
-                    j += 1
-                    
-                    while j < len(lines) and brace_count > 0:
-                        for char in lines[j]:
-                            if char == '{':
-                                brace_count += 1
-                            elif char == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    break
-                        
-                        if brace_count == 0:
-                            break
-                        
-                        j += 1
-                
-                end_line = min(j + 1, len(lines))
-                
-                # Extract class content
-                class_content = '\n'.join(lines[start_line:end_line])
-                
-                # Extract Javadoc if present
-                javadoc = ""
-                if start_line > 0 and lines[start_line - 1].strip().startswith('/**'):
-                    doc_start = start_line - 1
-                    while doc_start > 0 and not lines[doc_start].strip().startswith('/**'):
-                        doc_start -= 1
-                    
-                    if doc_start >= 0:
-                        doc_end = doc_start
-                        while doc_end < start_line and not lines[doc_end].strip().endswith('*/'):
-                            doc_end += 1
-                        
-                        if doc_end < start_line:
-                            javadoc = '\n'.join(lines[doc_start:doc_end + 1])
+                class_end = min(j + 1, len(lines))
+                class_content = '\n'.join(lines[class_start:class_end])
                 
                 results.append({
                     'type': 'class',
                     'name': class_name,
                     'content': class_content,
-                    'docstring': javadoc,
-                    'start_line': start_line,
-                    'end_line': end_line
+                    'start_line': class_start,
+                    'end_line': class_end
                 })
                 
-                i = end_line
+                i = class_end
+                continue
+            
+            # Check for method
+            method_match = method_pattern.match(line)
+            if method_match:
+                method_name = method_match.group(5)
+                method_start = i
+                
+                # Find matching closing brace
+                j = i
+                brace_count = 0
+                found_opening = False
+                
+                while j < len(lines):
+                    for char in lines[j]:
+                        if char == '{':
+                            found_opening = True
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if found_opening and brace_count == 0:
+                                break
+                    
+                    if found_opening and brace_count == 0:
+                        break
+                    
+                    j += 1
+                
+                method_end = min(j + 1, len(lines))
+                method_content = '\n'.join(lines[method_start:method_end])
+                
+                results.append({
+                    'type': 'method',
+                    'name': method_name,
+                    'content': method_content,
+                    'start_line': method_start,
+                    'end_line': method_end
+                })
+                
+                i = method_end
                 continue
             
             i += 1
         
-        # If no methods or classes found, return the whole file
+        # If no classes or methods found, return the whole file
         if not results:
             results.append({
                 'type': 'file',
                 'name': 'whole_file',
                 'content': code,
-                'docstring': '',
                 'start_line': 0,
                 'end_line': len(lines)
             })

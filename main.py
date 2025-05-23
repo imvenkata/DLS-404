@@ -7,6 +7,9 @@ import argparse
 from dotenv import load_dotenv
 from api.main import start_api_server
 from rag.rag_pipeline import RagPipeline
+# Import directly from the scripts directory
+import sys
+sys.path.append('/Users/venkata/hackathon/dls-404')
 from scripts.initialize_pipeline import extract_data, process_chunks, generate_embeddings, index_chunks
 
 # Load environment variables
