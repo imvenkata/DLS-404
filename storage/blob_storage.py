@@ -290,3 +290,47 @@ class BlobStorage:
         except Exception as e:
             logger.error(f"Failed to delete processed blob: {str(e)}")
             return False
+
+    @staticmethod
+    def sanitize_for_filename(file_path: str) -> str:
+        """
+        Sanitize the file path to be safe for use as a blob name.
+        Replaces directory separators with underscores and removes other invalid characters.
+        
+        Args:
+            file_path: The original file path.
+            
+        Returns:
+            A sanitized string suitable for a blob name.
+        """
+        if not file_path:
+            return "unknown_file"
+        
+        # Replace common directory separators with underscores
+        sanitized = file_path.replace('/', '_').replace('\\', '_')
+        
+        # Define a set of allowed characters (alphanumeric, underscore, hyphen, period)
+        # Azure Blob names are quite flexible but it's good to be somewhat restrictive.
+        # This is a simplified approach; for full compliance, refer to Azure naming rules.
+        allowed_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.-"
+        
+        # Filter out disallowed characters
+        sanitized = "".join(c for c in sanitized if c in allowed_chars)
+        
+        # Ensure the name isn't too long (Azure limit is 1024 chars, but often shorter is better)
+        # Let's cap at 255 for practical purposes, similar to many file systems.
+        if len(sanitized) > 255:
+            # Try to preserve file extension if present
+            parts = os.path.splitext(sanitized)
+            if len(parts) == 2 and len(parts[0]) > 0 and len(parts[1]) > 0:
+                # Max length for name part, keeping extension and dot
+                max_name_len = 255 - len(parts[1])
+                sanitized = parts[0][:max_name_len] + parts[1]
+            else:
+                sanitized = sanitized[:255]
+        
+        # Ensure the name is not empty after sanitization
+        if not sanitized:
+            return "sanitized_empty_filename"
+            
+        return sanitized
