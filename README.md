@@ -17,8 +17,7 @@ This repository contains a modular implementation of a Retrieval-Augmented Gener
       - [Extract from All Projects in Groups](#extract-from-all-projects-in-groups)
       - [Extract Epics from Multiple Groups](#extract-epics-from-multiple-groups)
       - [Combined Extraction](#combined-extraction)
-    - [Processing and Chunking](#processing-and-chunking)
-    - [Embedding Generation](#embedding-generation)
+    - [Processing, Chunking, and Embedding](#processing-chunking-and-embedding)
     - [Indexing](#indexing)
     - [Running the Complete Pipeline](#running-the-complete-pipeline)
     - [Running Only Data Extraction and Ingestion (No RAG)](#running-only-data-extraction-and-ingestion-no-rag)
@@ -177,6 +176,7 @@ This will extract:
 - Repository code files
 
 The extracted data is stored in Azure Blob Storage in the container specified in your configuration.
+Individual code files are stored as `code_{project_id}_{sanitized_original_file_path}.json`, and individual epics as `epic_{group_id}_{epic_identifier}.json`. Other data types like issues, merge requests, and commits are aggregated into respective JSON files per project.
 
 ### Multi-Project Extraction
 
@@ -230,61 +230,38 @@ python main.py --extract --project-id "12345,67890" --group-id "54321,98765"
 python main.py --extract --project-id "12345,67890" --group-id "54321,98765" --group-projects-id "13579,24680"
 ```
 
-### Processing and Chunking
+### Processing, Chunking, and Embedding
 
-To process and chunk the extracted data:
+This step now combines processing (chunking) of the extracted data and the generation of embeddings for these chunks. It reads the raw data from Azure Blob Storage (including individual code files, epics, and aggregated data for issues, MRs, and commits), chunks the content, generates embeddings for each chunk using Azure OpenAI, and stores the result in a single file named `data_with_embeddings.json` within the processed data container (e.g., `gitlab-processed/data_with_embeddings.json`).
+
+To process, chunk, and embed data:
 
 ```bash
+# For a specific project
 python main.py --process --project-id your_project_id
 
-# Example:
-python main.py --process --project-id "69861496"
+# For multiple projects
+python main.py --process --project-id "project_id_1,project_id_2"
+
+# For epics within specific groups (ensure these group IDs were used during extraction)
+python main.py --process --group-id "group_id_1,group_id_2"
+
+# Note: If --project-id and --group-id are not provided, it will attempt to process data 
+# for all projects/groups for which raw data was extracted in the default location.
 ```
-
-For multiple projects:
-
-```bash
-python main.py --process --project-id "12345,67890"
-```
-
-The system will:
-1. Load the extracted data from Azure Blob Storage
-2. Split text content into semantic chunks
-3. Split code into logical units (functions, classes, etc.)
-4. Store the chunks in Azure Blob Storage
-
-### Embedding Generation
-
-To generate embeddings for the chunks:
-
-```bash
-python main.py --embed --project-id your_project_id
-```
-
-For multiple projects:
-
-```bash
-python main.py --embed --project-id "12345,67890"
-```
-
-The system will:
-1. Load the chunks from Azure Blob Storage
-2. Generate embeddings using Azure OpenAI
-3. Store the chunks with embeddings in Azure Blob Storage
 
 ### Indexing
 
-To index the chunks in Azure AI Search:
+This step indexes the chunks (which now include embeddings from the previous combined step) into Azure AI Search. It reads the data directly from `data_with_embeddings.json` located in your processed data container.
+
+To index data:
 
 ```bash
+# For a specific project
 python main.py --index --project-id your_project_id
-```
 
-For multiple projects:
-
-```bash
-python main.py --index --project-id "12345,67890
- 
+# For multiple projects
+python main.py --index --project-id "project_id_1,project_id_2"
 ```
 
 The system will:

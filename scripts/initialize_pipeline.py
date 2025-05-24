@@ -140,14 +140,39 @@ def extract_data(project_ids: Union[str, List[str]],
             try:
                 logger.info(f"Extracting repository files from project {project_id}")
                 code_extractor = CodeExtractor()
-                files = code_extractor.extract_repository_files(project_id)
-                project_data['files'] = files
+                extracted_files_list = code_extractor.extract_repository_files(project_id)
+                # project_data['files'] = extracted_files_list  # This previously stored all file contents.
+                                                                # The pipeline now relies on individual blobs for file content.
+                                                                # If direct return value of extract_data is used elsewhere
+                                                                # and expects full file content, this might need adjustment.
+
+                saved_file_count = 0
+                if extracted_files_list:
+                    for file_data in extracted_files_list:
+                        try:
+                            original_file_path = file_data.get('path', 'unknown_file')
+                            # Sanitize file path for use in blob name: replace / with _ and handle potential empty paths
+                            if not original_file_path or original_file_path == 'unknown_file':
+                                sanitized_file_path = f"unknown_file_{hash(file_data.get('name', 'unnamed'))}"
+                            else:
+                                sanitized_file_path = original_file_path.replace('/', '_').replace('\\', '_')
+                            
+                            blob_filename = f"code_{project_id}_{sanitized_file_path}.json"
+                            
+                            # Ensure individual file data is JSON serializable
+                            json_safe_file_data = ensure_json_serializable(file_data)
+                            
+                            blob_storage.upload_raw_data(json_safe_file_data, blob_filename)
+                            logger.debug(f"Successfully saved extracted file {original_file_path} to {blob_filename}")
+                            saved_file_count += 1
+                        except Exception as file_save_e:
+                            logger.error(f"Error saving individual file {file_data.get('path', 'unknown_file')} "
+                                         f"for project {project_id}: {str(file_save_e)}")
                 
-                # Ensure all file data is JSON serializable
-                json_safe_files = ensure_json_serializable(files)
-                
-                blob_storage.upload_raw_data(json_safe_files, f"files_{project_id}.json")
-                logger.info(f"Extracted {len(files)} files from project {project_id}")
+                logger.info(f"Extracted and saved {saved_file_count} individual files from project {project_id}")
+                if extracted_files_list and saved_file_count != len(extracted_files_list):
+                    logger.warning(f"Mismatch in extracted ({len(extracted_files_list)}) vs saved ({saved_file_count}) files for project {project_id}")
+
             except Exception as e:
                 logger.error(f"Error extracting repository files from project {project_id}: {str(e)}")
         
@@ -159,235 +184,287 @@ def extract_data(project_ids: Union[str, List[str]],
             try:
                 logger.info(f"Extracting epics from group {group_id}")
                 issues_extractor = IssuesExtractor()
-                epics = issues_extractor.extract_epics(group_id)
-                if group_id not in extracted_data:
-                    extracted_data[group_id] = {}
-                extracted_data[group_id]['epics'] = epics
-                blob_storage.upload_raw_data(epics, f"epics_{group_id}.json")
-                logger.info(f"Extracted {len(epics)} epics from group {group_id}")
+                epics_list = issues_extractor.extract_epics(group_id)
+                # if group_id not in extracted_data: # Not storing epics list directly in extracted_data anymore
+                #     extracted_data[group_id] = {}
+                # extracted_data[group_id]['epics'] = epics_list
+
+                saved_epic_count = 0
+                if epics_list:
+                    for epic_data in epics_list:
+                        try:
+                            # Use epic iid if available, then id, then a hash of title for uniqueness
+                            epic_identifier = epic_data.get('iid', epic_data.get('id', f"uid_{hash(epic_data.get('title', 'untitled_epic'))}"))
+                            blob_filename = f"epic_{group_id}_{epic_identifier}.json"
+                            
+                            # Ensure individual epic data is JSON serializable
+                            json_safe_epic_data = ensure_json_serializable(epic_data)
+                            
+                            blob_storage.upload_raw_data(json_safe_epic_data, blob_filename)
+                            logger.debug(f"Successfully saved extracted epic {epic_identifier} from group {group_id} to {blob_filename}")
+                            saved_epic_count += 1
+                        except Exception as epic_save_e:
+                            logger.error(f"Error saving individual epic {epic_data.get('iid', epic_data.get('id', 'unknown'))} "
+                                         f"for group {group_id}: {str(epic_save_e)}")
+                
+                logger.info(f"Extracted and saved {saved_epic_count} individual epics from group {group_id}")
+                if epics_list and saved_epic_count != len(epics_list):
+                     logger.warning(f"Mismatch in extracted ({len(epics_list)}) vs saved ({saved_epic_count}) epics for group {group_id}")
+
             except Exception as e:
                 logger.error(f"Error extracting epics from group {group_id}: {str(e)}")
     
     return extracted_data
 
-def process_chunks(project_ids: Union[str, List[str]]):
+def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[str, List[str]] = None):
     """
-    Process and chunk extracted data.
+    Process, chunk, embed, and upload data for each source item individually.
     
     Args:
         project_ids: GitLab project IDs (string or list)
+        group_ids: Optional GitLab group IDs for epics (string or list)
         
     Returns:
-        List of chunks
+        List of all successfully embedded chunks from all items.
     """
-    # Initialize storage
     blob_storage = BlobStorage()
-    
-    # Initialize improved chunkers
     text_chunker = ImprovedTextChunker()
     code_chunker = ImprovedCodeChunker()
+    embeddings_generator = EmbeddingsGenerator() # Initialize early
     
-    # Log that we're using improved chunkers
-    logger.info("Using improved chunkers with logical IDs and indices")
-    
-    # Convert string IDs to lists if needed
-    if isinstance(project_ids, str):
-        project_ids = [pid.strip() for pid in project_ids.split(',')]
-    
-    all_chunks = []
-    
+    logger.info("Initialized services for chunking and embedding.")
+    if not embeddings_generator.client:
+        logger.error("EmbeddingsGenerator client failed to initialize. Cannot generate embeddings.")
+        # Early exit if embedding client is not available, as no items can be embedded.
+        # Alternatively, could proceed to chunk and save raw items, but current goal is embeddings.
+        return []
+
+    all_successfully_embedded_chunks_master = []
+
+    # Helper function to process, embed, and upload chunks for a single item
+    def _process_embed_and_upload_item_chunks(item_chunks: List[Dict[str, Any]], 
+                                              base_blob_name_no_ext: str, 
+                                              item_type_log: str, 
+                                              item_identifier_log: str) -> List[Dict[str, Any]]:
+        if not item_chunks:
+            logger.debug(f"No chunks provided for {item_type_log} '{item_identifier_log}', skipping.")
+            return []
+
+        target_blob_name = f"{base_blob_name_no_ext}.json"
+        try:
+            logger.info(f"Processing {len(item_chunks)} chunks for {item_type_log} '{item_identifier_log}'. Attempting to generate embeddings.")
+            
+            # process_chunks expects a list of dicts and adds 'embedding' key to each dict
+            # It handles batching and API calls internally.
+            # No need to copy item_chunks if process_chunks is robust or if we don't reuse item_chunks raw.
+            chunks_with_embeddings = embeddings_generator.process_chunks(item_chunks)
+            
+            if not chunks_with_embeddings or not any('embedding' in chunk for chunk in chunks_with_embeddings):
+                logger.warning(f"Embedding generation failed or returned no embeddings for {item_type_log} '{item_identifier_log}'. Raw chunks not saved for this item.")
+                return [] # Or save raw chunks to base_blob_name_no_ext + "_raw_chunks.json"
+
+            blob_storage.upload_processed_data(chunks_with_embeddings, target_blob_name)
+            logger.info(f"Successfully embedded and uploaded {len(chunks_with_embeddings)} chunks for {item_type_log} '{item_identifier_log}' to {target_blob_name}.")
+            return chunks_with_embeddings
+        except Exception as e:
+            logger.error(f"Error during embedding or upload for {item_type_log} '{item_identifier_log}' (target: {target_blob_name}): {str(e)}")
+            # Optionally, save raw chunks if embedding failed for this item:
+            # raw_target_name = f"{base_blob_name_no_ext}_raw_chunks_on_error.json"
+            # blob_storage.upload_processed_data(item_chunks, raw_target_name)
+            # logger.info(f"Saved raw chunks for {item_type_log} '{item_identifier_log}' to {raw_target_name} due to error.")
+            return []
+
+    # Convert string IDs to lists
+    if isinstance(project_ids, str): project_ids = [pid.strip() for pid in project_ids.split(',') if pid.strip()]
+    elif not project_ids: project_ids = []
+    if isinstance(group_ids, str): group_ids = [gid.strip() for gid in group_ids.split(',') if gid.strip()]
+    elif not group_ids: group_ids = []
+
     # Process each project
     for project_id in project_ids:
-        logger.info(f"Processing chunks for project {project_id}")
+        logger.info(f"--- Processing data for project {project_id} ---")
         
-        # Process issues
+        # Process issues for the current project
         try:
-            issues = blob_storage.download_raw_data(f"issues_{project_id}.json")
-            if issues:
-                logger.info(f"Processing {len(issues)} issues from project {project_id}")
-                
-                for issue in issues:
-                    # Process issue description
+            issues_data = blob_storage.download_raw_data(f"issues_{project_id}.json")
+            if issues_data:
+                logger.info(f"Processing {len(issues_data)} issues from project {project_id}")
+                for issue in issues_data:
+                    current_item_chunks = []
+                    issue_iid = issue.get('iid', issue.get('id', 'unknown_issue'))
+                    issue_title = issue.get('title', 'Untitled Issue')
+                    log_id = f"{project_id}/issue/{issue_iid} ('{issue_title[:30]}...')"
+
                     if 'description' in issue and issue['description']:
                         metadata = issue['metadata'].copy()
                         metadata['content_type'] = 'description'
-                        
-                        # Chunk description
-                        description_chunks = text_chunker.chunk_text(issue['description'], metadata)
-                        all_chunks.extend(description_chunks)
+                        current_item_chunks.extend(text_chunker.chunk_text(issue['description'], metadata))
                     
-                    # Process issue comments
                     if 'notes' in issue and issue['notes']:
                         for note in issue['notes']:
                             if 'body' in note and note['body']:
-                                metadata = issue['metadata'].copy()
+                                metadata = issue['metadata'].copy() # Start from base issue metadata
                                 metadata['content_type'] = 'comment'
-                                metadata['comment_id'] = note.get('id', 'unknown')
-                                
+                                metadata['comment_id'] = note.get('id', 'unknown_comment')
                                 if 'author' in note and isinstance(note['author'], dict):
                                     metadata['author_username'] = note['author'].get('username', 'unknown')
-                                    metadata['author_name'] = note['author'].get('name', 'unknown')
-                                
-                                # Chunk comment
-                                comment_chunks = text_chunker.chunk_text(note['body'], metadata)
-                                all_chunks.extend(comment_chunks)
-        except Exception as e:
-            logger.warning(f"Error processing issues for project {project_id}: {str(e)}")
-        
-        # Process merge requests
+                                current_item_chunks.extend(text_chunker.chunk_text(note['body'], metadata))
+                    
+                    if current_item_chunks:
+                        base_blob_name = f"processed_issue_{project_id}_{issue_iid}"
+                        embedded_chunks = _process_embed_and_upload_item_chunks(current_item_chunks, base_blob_name, "Issue", log_id)
+                        all_successfully_embedded_chunks_master.extend(embedded_chunks)
+        except Exception as e: logger.warning(f"Error loading or starting processing for issues in project {project_id}: {str(e)}")
+
+        # Process merge requests for the current project
         try:
-            merge_requests = blob_storage.download_raw_data(f"merge_requests_{project_id}.json")
-            if merge_requests:
-                logger.info(f"Processing {len(merge_requests)} merge requests from project {project_id}")
-                
-                for mr in merge_requests:
-                    # Process MR description
+            mrs_data = blob_storage.download_raw_data(f"merge_requests_{project_id}.json")
+            if mrs_data:
+                logger.info(f"Processing {len(mrs_data)} merge requests from project {project_id}")
+                for mr in mrs_data:
+                    current_item_chunks = []
+                    mr_iid = mr.get('iid', mr.get('id', 'unknown_mr'))
+                    mr_title = mr.get('title', 'Untitled MR')
+                    log_id = f"{project_id}/mr/{mr_iid} ('{mr_title[:30]}...')"
+
                     if 'description' in mr and mr['description']:
                         metadata = mr['metadata'].copy()
                         metadata['content_type'] = 'description'
-                        
-                        # Chunk description
-                        description_chunks = text_chunker.chunk_text(mr['description'], metadata)
-                        all_chunks.extend(description_chunks)
-                    
-                    # Process MR comments
+                        current_item_chunks.extend(text_chunker.chunk_text(mr['description'], metadata))
                     if 'notes' in mr and mr['notes']:
                         for note in mr['notes']:
                             if 'body' in note and note['body']:
                                 metadata = mr['metadata'].copy()
                                 metadata['content_type'] = 'comment'
-                                metadata['comment_id'] = note.get('id', 'unknown')
-                                
+                                metadata['comment_id'] = note.get('id', 'unknown_comment')
                                 if 'author' in note and isinstance(note['author'], dict):
                                     metadata['author_username'] = note['author'].get('username', 'unknown')
-                                    metadata['author_name'] = note['author'].get('name', 'unknown')
-                                
-                                # Chunk comment
-                                comment_chunks = text_chunker.chunk_text(note['body'], metadata)
-                                all_chunks.extend(comment_chunks)
-        except Exception as e:
-            logger.warning(f"Error processing merge requests for project {project_id}: {str(e)}")
-        
-        # Process commits
+                                current_item_chunks.extend(text_chunker.chunk_text(note['body'], metadata))
+                    
+                    if current_item_chunks:
+                        base_blob_name = f"processed_mr_{project_id}_{mr_iid}"
+                        embedded_chunks = _process_embed_and_upload_item_chunks(current_item_chunks, base_blob_name, "Merge Request", log_id)
+                        all_successfully_embedded_chunks_master.extend(embedded_chunks)
+        except Exception as e: logger.warning(f"Error loading or starting processing for MRs in project {project_id}: {str(e)}")
+
+        # Process commits for the current project
         try:
-            commits = blob_storage.download_raw_data(f"commits_{project_id}.json")
-            if commits:
-                logger.info(f"Processing {len(commits)} commits from project {project_id}")
-                
-                for commit in commits:
-                    # Process commit message
+            commits_data = blob_storage.download_raw_data(f"commits_{project_id}.json")
+            if commits_data:
+                logger.info(f"Processing {len(commits_data)} commits from project {project_id}")
+                for commit in commits_data:
+                    current_item_chunks = []
+                    commit_short_id = commit.get('short_id', commit.get('id', 'unknown_commit')[:8])
+                    commit_title = commit.get('title', 'Untitled Commit')
+                    log_id = f"{project_id}/commit/{commit_short_id} ('{commit_title[:30]}...')"
+
                     if 'message' in commit and commit['message']:
                         metadata = commit['metadata'].copy()
                         metadata['content_type'] = 'message'
-                        
-                        # Chunk message
-                        message_chunks = text_chunker.chunk_text(commit['message'], metadata)
-                        all_chunks.extend(message_chunks)
-                    
-                    # Process commit diff
+                        current_item_chunks.extend(text_chunker.chunk_text(commit['message'], metadata))
                     if 'diff' in commit and commit['diff']:
-                        metadata = commit['metadata'].copy()
-                        metadata['content_type'] = 'diff'
-                        
-                        # Combine diff entries into a single string
                         diff_text = ""
                         for diff_entry in commit['diff']:
                             if 'diff' in diff_entry:
-                                diff_text += f"File: {diff_entry.get('new_path', diff_entry.get('old_path', 'unknown'))}\n"
-                                diff_text += diff_entry['diff'] + "\n\n"
-                        
-                        # Chunk diff
-                        diff_chunks = text_chunker.chunk_text(diff_text, metadata)
-                        all_chunks.extend(diff_chunks)
-        except Exception as e:
-            logger.warning(f"Error processing commits for project {project_id}: {str(e)}")
-        
-        # Process repository files
-        try:
-            files = blob_storage.download_raw_data(f"files_{project_id}.json")
-            if files:
-                logger.info(f"Processing {len(files)} repository files from project {project_id}")
-                
-                for file in files:
-                    if 'content' in file and file['content']:
-                        metadata = file['metadata'].copy()
-                        
-                        # Add debug logging to see what metadata we have
-                        logger.info(f"File metadata: {metadata}")
-                        
-                        # Get file extension for better language detection
-                        file_path = metadata.get('path', '')
-                        extension = file_path.split('.')[-1].lower() if '.' in file_path else ''
-                        
-                        # Map file extensions to languages if not already set
-                        language_map = {
-                            'py': 'python',
-                            'js': 'javascript',
-                            'java': 'java',
-                            'cs': 'csharp',
-                            'jsx': 'javascript',
-                            'ts': 'javascript',
-                            'tsx': 'javascript'
-                        }
-                        
-                        # Use existing language or detect from extension
-                        language = metadata.get('language', language_map.get(extension, 'unknown'))
-                        metadata['language'] = language
-                        
-                        logger.info(f"Processing file {file_path} with language: {language}")
-                        
-                        # Determine chunking method based on file type
-                        if language in ['python', 'javascript', 'java', 'csharp']:
-                            # Use code chunker for programming languages
-                            logger.info(f"Using code chunker for {file_path}")
-                            code_chunks = code_chunker.chunk_code(file['content'], metadata)
-                            logger.info(f"Generated {len(code_chunks)} code chunks for {file_path}")
-                            all_chunks.extend(code_chunks)
-                        else:
-                            # Use text chunker for other file types
-                            logger.info(f"Using text chunker for {file_path}")
-                            text_chunks = text_chunker.chunk_text(file['content'], metadata)
-                            all_chunks.extend(text_chunks)
-        except Exception as e:
-            logger.warning(f"Error processing repository files for project {project_id}: {str(e)}")
-    
-    # Store chunks
-    logger.info(f"Generated {len(all_chunks)} chunks total")
-    blob_storage.upload_processed_data(all_chunks, f"chunks_all_projects.json")
-    
-    return all_chunks
+                                diff_text += f"File: {diff_entry.get('new_path', diff_entry.get('old_path', 'unknown'))}\n{diff_entry['diff']}\n\n"
+                        if diff_text:
+                            metadata = commit['metadata'].copy() # Base commit metadata
+                            metadata['content_type'] = 'diff'
+                            current_item_chunks.extend(text_chunker.chunk_text(diff_text, metadata))
+                    
+                    if current_item_chunks:
+                        base_blob_name = f"processed_commit_{project_id}_{commit_short_id}"
+                        embedded_chunks = _process_embed_and_upload_item_chunks(current_item_chunks, base_blob_name, "Commit", log_id)
+                        all_successfully_embedded_chunks_master.extend(embedded_chunks)
+        except Exception as e: logger.warning(f"Error loading or starting processing for commits in project {project_id}: {str(e)}")
 
-def generate_embeddings(project_ids: Union[str, List[str]] = None):
-    """
-    Generate embeddings for chunks.
-    
-    Args:
-        project_ids: GitLab project IDs (string or list) - used only for logging
-        
-    Returns:
-        List of chunks with embeddings
-    """
-    # Initialize storage
-    blob_storage = BlobStorage()
-    
-    # Initialize embedding generator
-    embedding_generator = EmbeddingsGenerator()
-    
-    # Download chunks
-    chunks = blob_storage.download_processed_data(f"chunks_all_projects.json")
-    if not chunks:
-        logger.error(f"No chunks found")
-        return []
-    
-    logger.info(f"Generating embeddings for {len(chunks)} chunks")
-    
-    # Generate embeddings
-    chunks_with_embeddings = embedding_generator.process_chunks(chunks)
-    
-    # Store chunks with embeddings
-    blob_storage.upload_processed_data(chunks_with_embeddings, f"chunks_with_embeddings_all_projects.json")
-    
-    return chunks_with_embeddings
+        # Process repository code files (individual JSONs from raw_data)
+        try:
+            code_file_blob_names = blob_storage.list_raw_blobs(name_starts_with=f"code_{project_id}_")
+            if code_file_blob_names:
+                logger.info(f"Processing {len(code_file_blob_names)} individual code files for project {project_id}")
+                for blob_name in code_file_blob_names:
+                    if not isinstance(blob_name, str) or not blob_name.endswith(".json"): continue
+                    
+                    file_data = blob_storage.download_raw_data(blob_name)
+                    if file_data and isinstance(file_data, dict) and 'content' in file_data and file_data['content'] and 'metadata' in file_data:
+                        current_item_chunks = []
+                        metadata = file_data['metadata'].copy()
+                        file_path = metadata.get('path', 'unknown_path')
+                        language = metadata.get('language', 'unknown')
+                        log_id = f"{project_id}/code/{file_path}"
+                        
+                        if language in ['python', 'javascript', 'java', 'csharp', 'jsx', 'ts', 'tsx']:
+                            current_item_chunks = code_chunker.chunk_code(file_data['content'], metadata)
+                        elif language in ['markdown', 'text', 'json', 'yaml', 'html', 'css']:
+                            current_item_chunks = text_chunker.chunk_text(file_data['content'], metadata)
+                        else:
+                            logger.warning(f"Unknown language '{language}' for {file_path}, using text_chunker.")
+                            current_item_chunks = text_chunker.chunk_text(file_data['content'], metadata)
+                        
+                        # Log chunk generation result before checking if current_item_chunks is populated
+                        chunker_name = "ImprovedCodeChunker" if language in ['python', 'javascript', 'java', 'csharp', 'jsx', 'ts', 'tsx'] else "ImprovedTextChunker"
+                        logger.debug(f"Attempted to chunk code file {log_id} (lang: {language}) using {chunker_name}. Number of chunks generated: {len(current_item_chunks)}.")
+
+                        if current_item_chunks:
+                            sanitized_path = BlobStorage.sanitize_for_filename(file_path)
+                            base_blob_name = f"processed_code_{project_id}_{sanitized_path}"
+                            embedded_chunks = _process_embed_and_upload_item_chunks(current_item_chunks, base_blob_name, "Code File", log_id)
+                            all_successfully_embedded_chunks_master.extend(embedded_chunks)
+                        else:
+                            # Log if no chunks were generated, including content length for context
+                            content_len = len(file_data['content']) if file_data and 'content' in file_data else -1 # Defensive length check
+                            logger.warning(f"No chunks were generated for code file {log_id} (path: {file_path}, lang: {language}, content length: {content_len}). Skipping embedding for this file.")
+                    else: 
+                        logger.warning(f"Skipping code blob {blob_name}: invalid data format or missing/empty 'content' or 'metadata'.")
+        except Exception as e: logger.error(f"Error listing or processing code files for project {project_id}: {str(e)}")
+
+    # Process epics from specified groups (individual JSONs from raw_data)
+    if group_ids:
+        for group_id in group_ids:
+            logger.info(f"--- Processing epic data for group {group_id} ---")
+            try:
+                epic_blob_names = blob_storage.list_raw_blobs(name_starts_with=f"epic_{group_id}_")
+                if epic_blob_names:
+                    logger.info(f"Processing {len(epic_blob_names)} individual epics for group {group_id}")
+                    for blob_name in epic_blob_names:
+                        if not isinstance(blob_name, str) or not blob_name.endswith(".json"): continue
+
+                        epic_data = blob_storage.download_raw_data(blob_name)
+                        if epic_data and isinstance(epic_data, dict) and 'metadata' in epic_data:
+                            current_item_chunks = []
+                            base_epic_metadata = epic_data['metadata'].copy()
+                            epic_iid = base_epic_metadata.get('iid', base_epic_metadata.get('id', 'unknown_epic'))
+                            epic_title = epic_data.get('title', 'Untitled Epic')
+                            log_id = f"{group_id}/epic/{epic_iid} ('{epic_title[:30]}...')"
+
+                            if epic_data.get('title'):
+                                meta_title = base_epic_metadata.copy()
+                                meta_title['content_type'] = 'epic_title'
+                                current_item_chunks.extend(text_chunker.chunk_text(epic_data['title'], meta_title))
+                            if epic_data.get('description'):
+                                meta_desc = base_epic_metadata.copy()
+                                meta_desc['content_type'] = 'epic_description'
+                                current_item_chunks.extend(text_chunker.chunk_text(epic_data['description'], meta_desc))
+                            
+                            if current_item_chunks:
+                                base_blob_name = f"processed_epic_{group_id}_{epic_iid}"
+                                embedded_chunks = _process_embed_and_upload_item_chunks(current_item_chunks, base_blob_name, "Epic", log_id)
+                                all_successfully_embedded_chunks_master.extend(embedded_chunks)
+                        else: logger.warning(f"Skipping epic blob {blob_name}: invalid data format or missing metadata.")
+            except Exception as e: logger.error(f"Error listing or processing epics for group {group_id}: {str(e)}")
+
+    if not all_successfully_embedded_chunks_master:
+        logger.info("Pipeline finished. No items were successfully processed to generate embedded chunks.")
+    else:
+        logger.info(f"Pipeline finished. A total of {len(all_successfully_embedded_chunks_master)} chunks from various items were successfully embedded and stored individually.")
+        # Optionally, create a manifest file listing all successfully created blob names
+        # manifest_content = [chunk['metadata'].get('source_blob_name_processed') for chunk in all_successfully_embedded_chunks_master if 'metadata' in chunk and 'source_blob_name_processed' in chunk['metadata']]
+        # if manifest_content:
+        #    blob_storage.upload_processed_data(list(set(manifest_content)), "manifest_of_processed_files.json")
+        #    logger.info("Uploaded a manifest of processed file names.")
+            
+    return all_successfully_embedded_chunks_master
 
 def index_chunks(project_ids: Union[str, List[str]] = None):
     """
@@ -405,8 +482,8 @@ def index_chunks(project_ids: Union[str, List[str]] = None):
     # Initialize search client
     search_client = AzureSearchClient()
     
-    # Download chunks with embeddings
-    chunks_with_embeddings = blob_storage.download_processed_data(f"chunks_with_embeddings_all_projects.json")
+    # Load chunks with embeddings
+    chunks_with_embeddings = blob_storage.download_processed_data("data_with_embeddings.json")
     if not chunks_with_embeddings:
         logger.error(f"No chunks with embeddings found")
         return False
