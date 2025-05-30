@@ -192,7 +192,7 @@ class RagPipeline:
         Returns:
             True if successful, False otherwise
         """
-        from extractors.issues_extractor import IssuesExtractor
+        from extractors.enhanced_issues_extractor import EnhancedIssuesExtractor
         from extractors.merge_requests_extractor import MergeRequestsExtractor
         from extractors.commits_extractor import CommitsExtractor
         from extractors.code_extractor import CodeExtractor
@@ -202,7 +202,7 @@ class RagPipeline:
         
         try:
             # Initialize extractors
-            issues_extractor = IssuesExtractor()
+            issues_extractor = EnhancedIssuesExtractor()
             mr_extractor = MergeRequestsExtractor()
             commits_extractor = CommitsExtractor()
             code_extractor = CodeExtractor()

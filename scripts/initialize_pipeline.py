@@ -7,7 +7,7 @@ import argparse
 import json
 from typing import List, Union, Dict, Any
 from dotenv import load_dotenv
-from extractors.issues_extractor import IssuesExtractor
+from extractors.enhanced_issues_extractor import EnhancedIssuesExtractor
 from extractors.merge_requests_extractor import MergeRequestsExtractor
 from extractors.commits_extractor import CommitsExtractor
 from extractors.code_extractor import CodeExtractor
@@ -103,7 +103,7 @@ def extract_data(project_ids: Union[str, List[str]],
         if extract_issues:
             try:
                 logger.info(f"Extracting issues from project {project_id}")
-                issues_extractor = IssuesExtractor()
+                issues_extractor = EnhancedIssuesExtractor()
                 issues = issues_extractor.extract_issues(project_id)
                 project_data['issues'] = issues
                 blob_storage.upload_raw_data(issues, f"issues_{project_id}.json")
@@ -183,7 +183,7 @@ def extract_data(project_ids: Union[str, List[str]],
         for group_id in group_ids:
             try:
                 logger.info(f"Extracting epics from group {group_id}")
-                issues_extractor = IssuesExtractor()
+                issues_extractor = EnhancedIssuesExtractor()
                 epics_list = issues_extractor.extract_epics(group_id)
                 # if group_id not in extracted_data: # Not storing epics list directly in extracted_data anymore
                 #     extracted_data[group_id] = {}

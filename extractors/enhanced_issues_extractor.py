@@ -1,7 +1,8 @@
 """
-Issues extractor for retrieving issues from GitLab.
+Enhanced issues extractor for retrieving issues and epics from GitLab with improved metadata extraction.
 """
 import logging
+import gitlab
 from typing import Dict, List, Any, Optional, Union
 from .gitlab_extractor import GitLabExtractor
 from config.config import GITLAB_PROJECT_ID
@@ -10,8 +11,8 @@ from config.config import GITLAB_PROJECT_ID
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class IssuesExtractor(GitLabExtractor):
-    """Class for extracting issues from GitLab."""
+class EnhancedIssuesExtractor(GitLabExtractor):
+    """Class for extracting issues and epics from GitLab with enhanced metadata."""
     
     def __init__(self, *args, **kwargs):
         """Initialize issues extractor."""
@@ -19,14 +20,14 @@ class IssuesExtractor(GitLabExtractor):
     
     def extract_issues(self, project_id: Union[str, int] = GITLAB_PROJECT_ID, **kwargs) -> List[Dict[str, Any]]:
         """
-        Extract issues from a project.
+        Extract issues from a project with enhanced metadata.
         
         Args:
             project_id: GitLab project ID
             **kwargs: Additional parameters for filtering
             
         Returns:
-            List of issues as dictionaries
+            List of issues as dictionaries with enhanced metadata
         """
         try:
             project = self.get_project(project_id)
@@ -56,6 +57,7 @@ class IssuesExtractor(GitLabExtractor):
                 if 'title' in issue_data:
                     metadata['title'] = issue_data['title']
                 
+                # Use description for embedding
                 if 'description' in issue_data:
                     metadata['content_to_embed'] = issue_data['description']
                 
@@ -171,14 +173,14 @@ class IssuesExtractor(GitLabExtractor):
     
     def extract_epics(self, group_id: Union[str, int], **kwargs) -> List[Dict[str, Any]]:
         """
-        Extract epics from a group using Work Items API.
+        Extract epics from a group using Work Items API with enhanced metadata.
         
         Args:
             group_id: GitLab group ID
             **kwargs: Additional parameters for filtering
             
         Returns:
-            List of epics as dictionaries
+            List of epics as dictionaries with enhanced metadata
         """
         try:
             group = self.get_group(group_id)
@@ -203,11 +205,88 @@ class IssuesExtractor(GitLabExtractor):
                     if 'title' in epic_data:
                         metadata['title'] = epic_data['title']
                     
+                    # Use description for embedding
+                    if 'description' in epic_data:
+                        metadata['content_to_embed'] = epic_data['description']
+                    
                     if 'state' in epic_data:
                         metadata['state'] = epic_data['state']
                     
                     if 'labels' in epic_data and isinstance(epic_data['labels'], list):
                         metadata['labels'] = epic_data['labels']
+                        metadata['tags_or_labels'] = epic_data['labels']
+                    
+                    # Process assignees if available
+                    assignee_names = []
+                    assignee_ids = []
+                    if 'assignees' in epic_data and isinstance(epic_data['assignees'], list):
+                        for assignee in epic_data['assignees']:
+                            if isinstance(assignee, dict):
+                                if 'username' in assignee:
+                                    assignee_names.append(assignee.get('username', 'unknown'))
+                                if 'id' in assignee:
+                                    assignee_ids.append(str(assignee.get('id', '')))
+                        
+                        metadata['assignee_names'] = assignee_names
+                        metadata['assignee_ids'] = assignee_ids
+                    
+                    # Process other epic fields
+                    if 'start_date' in epic_data:
+                        metadata['start_date'] = epic_data['start_date']
+                    
+                    if 'end_date' in epic_data:
+                        metadata['due_date'] = epic_data['end_date']
+                    
+                    if 'closed_at' in epic_data:
+                        metadata['closed_at'] = epic_data['closed_at']
+                    
+                    if 'upvotes' in epic_data:
+                        metadata['upvotes'] = epic_data['upvotes']
+                    
+                    if 'downvotes' in epic_data:
+                        metadata['downvotes'] = epic_data['downvotes']
+                    
+                    # Add parent epic information if available
+                    if 'parent' in epic_data and isinstance(epic_data['parent'], dict):
+                        metadata['parent_epic_title'] = epic_data['parent'].get('title', '')
+                        metadata['parent_epic_id'] = str(epic_data['parent'].get('id', ''))
+                    
+                    # Add linked items references
+                    linked_items = []
+                    if 'references' in epic_data and isinstance(epic_data['references'], dict):
+                        if 'full' in epic_data['references']:
+                            linked_items.append(epic_data['references']['full'])
+                        if 'short' in epic_data['references']:
+                            linked_items.append(epic_data['references']['short'])
+                    
+                    metadata['linked_items_references'] = linked_items
+                    
+                    # Add GitLab item metadata structure
+                    metadata['gitlab_item'] = {
+                        'item_internal_id': epic_data.get('iid', 0),
+                        'item_global_id': epic_data.get('id', 0),
+                        'status_or_state': epic_data.get('state', ''),
+                        'assignee_names': assignee_names,
+                        'assignee_ids': assignee_ids,
+                        'reporter_name': metadata.get('author_name', ''),
+                        'reporter_id': str(epic_data.get('author', {}).get('id', '')),
+                        'milestone_title': None,  # Epics don't have milestones
+                        'milestone_id': None,
+                        'priority': epic_data.get('priority', None),
+                        'severity': None,  # Epics don't have severity
+                        'weight': epic_data.get('weight', None),
+                        'time_estimate': None,  # Epics don't have time estimates
+                        'time_spent': None,
+                        'due_date': metadata.get('due_date', None),
+                        'closed_at': epic_data.get('closed_at', None),
+                        'closed_by_name': None,  # May not be available
+                        'parent_epic_title': metadata.get('parent_epic_title', None),
+                        'parent_epic_id': metadata.get('parent_epic_id', None),
+                        'linked_items_references': linked_items,
+                        'discussion_count': epic_data.get('user_notes_count', None),
+                        'upvotes': epic_data.get('upvotes', None),
+                        'downvotes': epic_data.get('downvotes', None)
+                    }
                     
                     # Add metadata to epic data
                     epic_data['metadata'] = metadata
@@ -240,11 +319,88 @@ class IssuesExtractor(GitLabExtractor):
                     if 'title' in epic_data:
                         metadata['title'] = epic_data['title']
                     
+                    # Use description for embedding
+                    if 'description' in epic_data:
+                        metadata['content_to_embed'] = epic_data['description']
+                    
                     if 'state' in epic_data:
                         metadata['state'] = epic_data['state']
                     
                     if 'labels' in epic_data and isinstance(epic_data['labels'], list):
                         metadata['labels'] = epic_data['labels']
+                        metadata['tags_or_labels'] = epic_data['labels']
+                    
+                    # Process assignees if available
+                    assignee_names = []
+                    assignee_ids = []
+                    if 'assignees' in epic_data and isinstance(epic_data['assignees'], list):
+                        for assignee in epic_data['assignees']:
+                            if isinstance(assignee, dict):
+                                if 'username' in assignee:
+                                    assignee_names.append(assignee.get('username', 'unknown'))
+                                if 'id' in assignee:
+                                    assignee_ids.append(str(assignee.get('id', '')))
+                        
+                        metadata['assignee_names'] = assignee_names
+                        metadata['assignee_ids'] = assignee_ids
+                    
+                    # Process other epic fields
+                    if 'start_date' in epic_data:
+                        metadata['start_date'] = epic_data['start_date']
+                    
+                    if 'end_date' in epic_data:
+                        metadata['due_date'] = epic_data['end_date']
+                    
+                    if 'closed_at' in epic_data:
+                        metadata['closed_at'] = epic_data['closed_at']
+                    
+                    if 'upvotes' in epic_data:
+                        metadata['upvotes'] = epic_data['upvotes']
+                    
+                    if 'downvotes' in epic_data:
+                        metadata['downvotes'] = epic_data['downvotes']
+                    
+                    # Add parent epic information if available
+                    if 'parent' in epic_data and isinstance(epic_data['parent'], dict):
+                        metadata['parent_epic_title'] = epic_data['parent'].get('title', '')
+                        metadata['parent_epic_id'] = str(epic_data['parent'].get('id', ''))
+                    
+                    # Add linked items references
+                    linked_items = []
+                    if 'references' in epic_data and isinstance(epic_data['references'], dict):
+                        if 'full' in epic_data['references']:
+                            linked_items.append(epic_data['references']['full'])
+                        if 'short' in epic_data['references']:
+                            linked_items.append(epic_data['references']['short'])
+                    
+                    metadata['linked_items_references'] = linked_items
+                    
+                    # Add GitLab item metadata structure
+                    metadata['gitlab_item'] = {
+                        'item_internal_id': epic_data.get('iid', 0),
+                        'item_global_id': epic_data.get('id', 0),
+                        'status_or_state': epic_data.get('state', ''),
+                        'assignee_names': assignee_names,
+                        'assignee_ids': assignee_ids,
+                        'reporter_name': metadata.get('author_name', ''),
+                        'reporter_id': str(epic_data.get('author', {}).get('id', '')),
+                        'milestone_title': None,  # Epics don't have milestones
+                        'milestone_id': None,
+                        'priority': epic_data.get('priority', None),
+                        'severity': None,  # Epics don't have severity
+                        'weight': epic_data.get('weight', None),
+                        'time_estimate': None,  # Epics don't have time estimates
+                        'time_spent': None,
+                        'due_date': metadata.get('due_date', None),
+                        'closed_at': epic_data.get('closed_at', None),
+                        'closed_by_name': None,  # May not be available
+                        'parent_epic_title': metadata.get('parent_epic_title', None),
+                        'parent_epic_id': metadata.get('parent_epic_id', None),
+                        'linked_items_references': linked_items,
+                        'discussion_count': epic_data.get('user_notes_count', None),
+                        'upvotes': epic_data.get('upvotes', None),
+                        'downvotes': epic_data.get('downvotes', None)
+                    }
                     
                     # Add metadata to epic data
                     epic_data['metadata'] = metadata
