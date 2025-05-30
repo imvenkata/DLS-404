@@ -95,21 +95,21 @@ def create_search_index(
             ),
             
             # Metadata fields
-            SimpleField(name="source_system", type="Edm.String", filterable=True),
-            SimpleField(name="entity_type", type="Edm.String", filterable=True),
-            SimpleField(name="entity_subtype", type="Edm.String", filterable=True),
+            SimpleField(name="source_system", type="Edm.String", filterable=True, facetable=True),
+            SimpleField(name="entity_type", type="Edm.String", filterable=True, facetable=True),
+            SearchableField(name="entity_subtype", type="Edm.String", filterable=True, facetable=True, analyzer_name="en.microsoft"),
             
             # Common metadata fields
             SearchableField(name="title", type="Edm.String", analyzer_name="en.microsoft"),
-            SimpleField(name="created_at", type="Edm.String", filterable=True),
-            SimpleField(name="updated_at", type="Edm.String", filterable=True),
-            SimpleField(name="author_name", type="Edm.String", filterable=True),
+            SimpleField(name="created_at", type="Edm.DateTimeOffset", filterable=True, sortable=True),
+            SimpleField(name="updated_at", type="Edm.DateTimeOffset", filterable=True, sortable=True),
+            SearchableField(name="author_name", type="Edm.String", filterable=True, facetable=True, analyzer_name="en.microsoft"),
             SimpleField(name="author_id", type="Edm.String", filterable=True),
             
             # Entity-specific fields
             SimpleField(name="web_url", type="Edm.String"),
-            SimpleField(name="project_identifier", type="Edm.String", filterable=True),
-            SimpleField(name="project_name", type="Edm.String", filterable=True),
+            SearchableField(name="project_identifier", type="Edm.String", filterable=True, analyzer_name="standard.lucene"),
+            SearchableField(name="project_name", type="Edm.String", filterable=True, facetable=True, analyzer_name="en.microsoft"),
             
             # Additional metadata as JSON
             SimpleField(name="metadata_json", type="Edm.String")
@@ -137,11 +137,20 @@ def create_search_index(
             ]
         )
         
-        # Create index
+        # Create index with all top-level properties for completeness
         index = SearchIndex(
             name=index_name,
             fields=fields,
-            vector_search=vector_search
+            vector_search=vector_search,
+            scoring_profiles=[],
+            suggesters=[],
+            analyzers=[],
+            char_filters=[],
+            tokenizers=[],
+            token_filters=[],
+            semantic_search=None,
+            cors_options=None,
+            encryption_key=None
         )
         
         index_client.create_index(index)
@@ -279,14 +288,53 @@ def process_blob_data(blob_storage: BlobStorage, blob_name: str, embeddings_gene
         # Add selected metadata fields
         metadata_fields = [
             "source_system", "entity_type", "entity_subtype", "title",
-            "created_at", "updated_at", "author_name", "author_id",
-            "web_url", "project_identifier", "project_name"
+            "author_name", "author_id", "web_url", "project_identifier", "project_name"
         ]
         
+        # Process standard fields
         for field in metadata_fields:
             value = metadata.get(field)
             if value is not None:
                 document[field] = value
+        
+        # Process date fields with special handling for DateTimeOffset
+        for date_field in ["created_at", "updated_at"]:
+            value = metadata.get(date_field)
+            if value:
+                # Try to ensure proper ISO 8601 format for DateTimeOffset
+                try:
+                    # If it's already a string in ISO format, use it directly
+                    if isinstance(value, str) and ('T' in value or 'Z' in value):
+                        document[date_field] = value
+                    # If it's a timestamp or other format, convert to ISO 8601
+                    else:
+                        from datetime import datetime
+                        if isinstance(value, (int, float)):
+                            # Assume Unix timestamp
+                            dt = datetime.fromtimestamp(value)
+                        elif isinstance(value, str):
+                            # Try to parse the string date
+                            try:
+                                dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                            except ValueError:
+                                # Fall back to a simple format
+                                try:
+                                    dt = datetime.strptime(value, "%Y-%m-%d")
+                                except ValueError:
+                                    # If all parsing fails, use the string as is
+                                    document[date_field] = value
+                                    continue
+                        else:
+                            # Use the value as is if it's not a recognized format
+                            document[date_field] = value
+                            continue
+                            
+                        # Format as ISO 8601 with timezone
+                        document[date_field] = dt.isoformat()
+                except Exception as e:
+                    # If any error occurs, use the original value
+                    logger.warning(f"Error formatting date field {date_field}: {e}")
+                    document[date_field] = value
         
         # Add all other metadata as a JSON string
         other_metadata = {k: v for k, v in metadata.items() if k not in metadata_fields + ["id", "content", "embedding"]}
