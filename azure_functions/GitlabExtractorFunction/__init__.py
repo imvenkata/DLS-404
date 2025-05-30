@@ -4,7 +4,7 @@ Azure Functions initialization for GitlabExtractorFunction.
 import logging
 import azure.functions as func
 import json
-from extractors.issues_extractor import IssuesExtractor
+from extractors.enhanced_issues_extractor import EnhancedIssuesExtractor
 from extractors.merge_requests_extractor import MergeRequestsExtractor
 from extractors.commits_extractor import CommitsExtractor
 from extractors.code_extractor import CodeExtractor
@@ -53,7 +53,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Extract issues
         if extract_issues:
             logger.info(f"Extracting issues from project {project_id}")
-            issues_extractor = IssuesExtractor()
+            issues_extractor = EnhancedIssuesExtractor()
             issues = issues_extractor.extract_issues(project_id)
             extracted_data['issues'] = issues
             blob_storage.upload_raw_data(issues, f"issues_{project_id}.json")
@@ -85,7 +85,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         # Extract epics if group ID is provided
         if extract_epics and group_id:
             logger.info(f"Extracting epics from group {group_id}")
-            issues_extractor = IssuesExtractor()
+            issues_extractor = EnhancedIssuesExtractor()
             epics = issues_extractor.extract_epics(group_id)
             extracted_data['epics'] = epics
             blob_storage.upload_raw_data(epics, f"epics_{group_id}.json")

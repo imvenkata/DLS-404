@@ -118,6 +118,7 @@ class ImprovedTextChunker:
         chunks = []
         current_chunk = []
         current_size = 0
+        total_chunks = (len(text) // self.max_chunk_size) + 1  # Estimate total chunks
         
         for sentence in sentences:
             # Approximate token count (rough estimate)
@@ -137,11 +138,89 @@ class ImprovedTextChunker:
                 # Calculate a logical chunk index
                 chunk_index = len(chunks)
                 
-                chunk_metadata = metadata.copy()
-                chunk_metadata.update({
-                    'chunk_id': chunk_id,
-                    'chunk_index': chunk_index
-                })
+                # Create content hash
+                content_hash = hashlib.md5(chunk_text.encode()).hexdigest()
+                
+                # Determine entity type and subtype
+                entity_type = metadata.get('entity_type', 'text')
+                entity_subtype = metadata.get('content_type', 'unknown')
+                
+                # Prepare unified metadata schema
+                chunk_metadata = {
+                    # Core Schema Structure
+                    'id': chunk_id,
+                    'source_system': 'gitlab',
+                    'entity_type': entity_type,
+                    'entity_subtype': entity_subtype,
+                    'title': metadata.get('title', f'Text chunk {chunk_index}'),
+                    'content_to_embed': chunk_text,
+                    'content_summary': metadata.get('summary', None),
+                    'created_at': metadata.get('created_at', None),
+                    'updated_at': metadata.get('updated_at', None),
+                    'author_name': metadata.get('author_name', ''),
+                    'author_id': metadata.get('author_id', ''),
+                    'author_email': metadata.get('author_email', None),
+                    'web_url': metadata.get('web_url', ''),
+                    'tags_or_labels': metadata.get('tags_or_labels', []),
+                    'project_identifier': metadata.get('project_id', ''),
+                    'project_name': metadata.get('project_name', ''),
+                    'project_web_url': metadata.get('project_web_url', None),
+                    'parent_entity_id': metadata.get('parent_entity_id', None),
+                    'related_entity_ids': metadata.get('related_entity_ids', []),
+                    'content_hash': content_hash,
+                    'processing_metadata': {
+                        'chunk_index': chunk_index,
+                        'total_chunks': total_chunks,
+                        'chunk_overlap_start': 0,  # Will be updated for overlapping chunks
+                        'chunk_overlap_end': 0     # Will be updated for overlapping chunks
+                    }
+                }
+                
+                # Add GitLab specific fields based on entity type
+                if entity_type == 'issue' or entity_type == 'merge_request' or entity_type == 'epic':
+                    chunk_metadata['gitlab_item'] = {
+                        'item_internal_id': metadata.get('iid', 0),
+                        'item_global_id': metadata.get('id', 0),
+                        'status_or_state': metadata.get('state', ''),
+                        'assignee_names': metadata.get('assignee_names', []),
+                        'assignee_ids': metadata.get('assignee_ids', []),
+                        'reporter_name': metadata.get('author_name', ''),
+                        'reporter_id': metadata.get('author_id', ''),
+                        'milestone_title': metadata.get('milestone_title', None),
+                        'milestone_id': metadata.get('milestone_id', None),
+                        'priority': metadata.get('priority', None),
+                        'severity': metadata.get('severity', None),
+                        'weight': metadata.get('weight', None),
+                        'time_estimate': metadata.get('time_estimate', None),
+                        'time_spent': metadata.get('time_spent', None),
+                        'due_date': metadata.get('due_date', None),
+                        'closed_at': metadata.get('closed_at', None),
+                        'closed_by_name': metadata.get('closed_by_name', None),
+                        'parent_epic_title': metadata.get('parent_epic_title', None),
+                        'parent_epic_id': metadata.get('parent_epic_id', None),
+                        'linked_items_references': metadata.get('linked_items_references', []),
+                        'discussion_count': metadata.get('discussion_count', None),
+                        'upvotes': metadata.get('upvotes', None),
+                        'downvotes': metadata.get('downvotes', None)
+                    }
+                
+                # Add merge request specific fields if applicable
+                if entity_type == 'merge_request':
+                    chunk_metadata['gitlab_mr'] = {
+                        'source_branch': metadata.get('source_branch', ''),
+                        'target_branch': metadata.get('target_branch', ''),
+                        'merge_status': metadata.get('merge_status', ''),
+                        'draft': metadata.get('draft', False),
+                        'merge_commit_sha': metadata.get('merge_commit_sha', None),
+                        'squash': metadata.get('squash', None),
+                        'changes_count': metadata.get('changes_count', None),
+                        'additions': metadata.get('additions', None),
+                        'deletions': metadata.get('deletions', None),
+                        'modified_files': metadata.get('modified_files', []),
+                        'review_status': metadata.get('review_status', None),
+                        'pipeline_status': metadata.get('pipeline_status', None),
+                        'merge_when_pipeline_succeeds': metadata.get('merge_when_pipeline_succeeds', None)
+                    }
                 
                 chunks.append({
                     'content': chunk_text,
@@ -150,8 +229,19 @@ class ImprovedTextChunker:
                 
                 # Start a new chunk with overlap
                 overlap_tokens = min(self.chunk_overlap // sentence_size, len(current_chunk))
-                current_chunk = current_chunk[-overlap_tokens:] if overlap_tokens > 0 else []
+                overlap_content = current_chunk[-overlap_tokens:] if overlap_tokens > 0 else []
+                
+                # Update overlap metadata for the previous chunk if there's overlap
+                if overlap_tokens > 0:
+                    chunks[-1]['metadata']['processing_metadata']['chunk_overlap_end'] = overlap_tokens
+                
+                current_chunk = overlap_content.copy() if overlap_content else []
                 current_size = sum(len(s.split()) for s in current_chunk)
+                
+                # Update overlap metadata for the new chunk if there's overlap
+                if overlap_tokens > 0 and current_chunk:
+                    # Will set this on the next chunk when it's created
+                    overlap_start = overlap_tokens
             
             current_chunk.append(sentence)
             current_size += sentence_size
@@ -170,11 +260,89 @@ class ImprovedTextChunker:
             # Calculate a logical chunk index
             chunk_index = len(chunks)
             
-            chunk_metadata = metadata.copy()
-            chunk_metadata.update({
-                'chunk_id': chunk_id,
-                'chunk_index': chunk_index
-            })
+            # Create content hash
+            content_hash = hashlib.md5(chunk_text.encode()).hexdigest()
+            
+            # Determine entity type and subtype
+            entity_type = metadata.get('entity_type', 'text')
+            entity_subtype = metadata.get('content_type', 'unknown')
+            
+            # Prepare unified metadata schema
+            chunk_metadata = {
+                # Core Schema Structure
+                'id': chunk_id,
+                'source_system': 'gitlab',
+                'entity_type': entity_type,
+                'entity_subtype': entity_subtype,
+                'title': metadata.get('title', f'Text chunk {chunk_index}'),
+                'content_to_embed': chunk_text,
+                'content_summary': metadata.get('summary', None),
+                'created_at': metadata.get('created_at', None),
+                'updated_at': metadata.get('updated_at', None),
+                'author_name': metadata.get('author_name', ''),
+                'author_id': metadata.get('author_id', ''),
+                'author_email': metadata.get('author_email', None),
+                'web_url': metadata.get('web_url', ''),
+                'tags_or_labels': metadata.get('tags_or_labels', []),
+                'project_identifier': metadata.get('project_id', ''),
+                'project_name': metadata.get('project_name', ''),
+                'project_web_url': metadata.get('project_web_url', None),
+                'parent_entity_id': metadata.get('parent_entity_id', None),
+                'related_entity_ids': metadata.get('related_entity_ids', []),
+                'content_hash': content_hash,
+                'processing_metadata': {
+                    'chunk_index': chunk_index,
+                    'total_chunks': total_chunks,
+                    'chunk_overlap_start': 0,  # Will be updated for overlapping chunks
+                    'chunk_overlap_end': 0     # Will be updated for overlapping chunks
+                }
+            }
+            
+            # Add GitLab specific fields based on entity type
+            if entity_type == 'issue' or entity_type == 'merge_request' or entity_type == 'epic':
+                chunk_metadata['gitlab_item'] = {
+                    'item_internal_id': metadata.get('iid', 0),
+                    'item_global_id': metadata.get('id', 0),
+                    'status_or_state': metadata.get('state', ''),
+                    'assignee_names': metadata.get('assignee_names', []),
+                    'assignee_ids': metadata.get('assignee_ids', []),
+                    'reporter_name': metadata.get('author_name', ''),
+                    'reporter_id': metadata.get('author_id', ''),
+                    'milestone_title': metadata.get('milestone_title', None),
+                    'milestone_id': metadata.get('milestone_id', None),
+                    'priority': metadata.get('priority', None),
+                    'severity': metadata.get('severity', None),
+                    'weight': metadata.get('weight', None),
+                    'time_estimate': metadata.get('time_estimate', None),
+                    'time_spent': metadata.get('time_spent', None),
+                    'due_date': metadata.get('due_date', None),
+                    'closed_at': metadata.get('closed_at', None),
+                    'closed_by_name': metadata.get('closed_by_name', None),
+                    'parent_epic_title': metadata.get('parent_epic_title', None),
+                    'parent_epic_id': metadata.get('parent_epic_id', None),
+                    'linked_items_references': metadata.get('linked_items_references', []),
+                    'discussion_count': metadata.get('discussion_count', None),
+                    'upvotes': metadata.get('upvotes', None),
+                    'downvotes': metadata.get('downvotes', None)
+                }
+            
+            # Add merge request specific fields if applicable
+            if entity_type == 'merge_request':
+                chunk_metadata['gitlab_mr'] = {
+                    'source_branch': metadata.get('source_branch', ''),
+                    'target_branch': metadata.get('target_branch', ''),
+                    'merge_status': metadata.get('merge_status', ''),
+                    'draft': metadata.get('draft', False),
+                    'merge_commit_sha': metadata.get('merge_commit_sha', None),
+                    'squash': metadata.get('squash', None),
+                    'changes_count': metadata.get('changes_count', None),
+                    'additions': metadata.get('additions', None),
+                    'deletions': metadata.get('deletions', None),
+                    'modified_files': metadata.get('modified_files', []),
+                    'review_status': metadata.get('review_status', None),
+                    'pipeline_status': metadata.get('pipeline_status', None),
+                    'merge_when_pipeline_succeeds': metadata.get('merge_when_pipeline_succeeds', None)
+                }
             
             chunks.append({
                 'content': chunk_text,

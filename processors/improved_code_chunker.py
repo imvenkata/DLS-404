@@ -101,6 +101,7 @@ class ImprovedCodeChunker:
         code_units = self.extract_functions_and_classes(code, language)
         
         chunks = []
+        total_chunks = len(code_units)
         
         # Process each code unit
         for i, unit in enumerate(code_units):
@@ -108,6 +109,8 @@ class ImprovedCodeChunker:
             unit_name = unit['name']
             unit_content = unit['content']
             docstring = unit.get('docstring', '')
+            start_line = unit.get('start_line', 0)
+            end_line = unit.get('end_line', 0)
             
             # Approximate token count (rough estimate)
             content_size = len(unit_content.split())
@@ -119,13 +122,15 @@ class ImprovedCodeChunker:
                 current_chunk = []
                 current_size = 0
                 chunk_part = 0
+                chunk_start_line = start_line
                 
-                for line in lines:
+                for line_idx, line in enumerate(lines):
                     line_size = len(line.split())
                     
                     if current_size + line_size > self.max_chunk_size and current_chunk:
                         # Create a chunk from accumulated lines
                         chunk_text = '\n'.join(current_chunk)
+                        chunk_end_line = chunk_start_line + len(current_chunk) - 1
                         
                         # Generate a logical chunk ID
                         chunk_id = self._generate_chunk_id(
@@ -137,19 +142,67 @@ class ImprovedCodeChunker:
                         )
                         
                         # Calculate a logical chunk index
-                        # Use a formula that keeps related chunks together
-                        # Base index on file path and unit name
                         chunk_index = len(chunks)
                         
-                        chunk_metadata = metadata.copy()
-                        chunk_metadata.update({
-                            'chunk_id': chunk_id,
-                            'chunk_index': chunk_index,
-                            'code_unit_type': unit_type,
-                            'code_unit_name': unit_name,
-                            'code_unit_part': chunk_part,
-                            'language': language
-                        })
+                        # Create content hash
+                        content_hash = hashlib.md5(chunk_text.encode()).hexdigest()
+                        
+                        # Extract file information
+                        file_path = metadata.get('path', '')
+                        file_name = file_path.split('/')[-1] if file_path else ''
+                        file_extension = file_name.split('.')[-1] if '.' in file_name else ''
+                        
+                        # Prepare unified metadata schema
+                        chunk_metadata = {
+                            # Core Schema Structure
+                            'id': chunk_id,
+                            'source_system': 'gitlab',
+                            'entity_type': 'code',
+                            'entity_subtype': unit_type,
+                            'title': f'{unit_type} {unit_name}' if unit_name != 'whole_file' else file_name,
+                            'content_to_embed': chunk_text,
+                            'content_summary': docstring if docstring else None,
+                            'created_at': metadata.get('created_at', None),
+                            'updated_at': metadata.get('updated_at', None),
+                            'author_name': metadata.get('author_name', ''),
+                            'author_id': metadata.get('author_id', ''),
+                            'author_email': metadata.get('author_email', None),
+                            'web_url': metadata.get('web_url', ''),
+                            'tags_or_labels': metadata.get('tags_or_labels', []),
+                            'project_identifier': metadata.get('project_id', ''),
+                            'project_name': metadata.get('project_name', ''),
+                            'project_web_url': metadata.get('project_web_url', None),
+                            'parent_entity_id': metadata.get('parent_entity_id', None),
+                            'related_entity_ids': metadata.get('related_entity_ids', []),
+                            'content_hash': content_hash,
+                            'processing_metadata': {
+                                'chunk_index': chunk_index,
+                                'total_chunks': total_chunks,
+                                'chunk_overlap_start': 0,  # Will be updated for overlapping chunks
+                                'chunk_overlap_end': 0     # Will be updated for overlapping chunks
+                            },
+                            
+                            # GitLab Code-Specific Fields
+                            'gitlab_code': {
+                                'file_path': file_path,
+                                'file_name': file_name,
+                                'file_extension': file_extension,
+                                'programming_language': language,
+                                'code_unit_type': unit_type,
+                                'code_unit_name': unit_name,
+                                'git_reference': metadata.get('git_reference', ''),
+                                'commit_sha': metadata.get('commit_sha', ''),
+                                'repository_url': metadata.get('repository_url', ''),
+                                'start_line_number': chunk_start_line,
+                                'end_line_number': chunk_end_line,
+                                'total_lines': chunk_end_line - chunk_start_line + 1,
+                                'has_docstring': bool(docstring),
+                                'complexity_score': None,  # Could be calculated with a code complexity analyzer
+                                'dependencies': [],  # Could be extracted with static analysis
+                                'api_endpoints': [],  # Could be extracted with pattern matching
+                                'test_coverage': None  # Would need integration with test coverage tools
+                            }
+                        }
                         
                         chunks.append({
                             'content': chunk_text,
@@ -158,9 +211,20 @@ class ImprovedCodeChunker:
                         
                         # Start a new chunk with overlap
                         overlap_lines = min(self.chunk_overlap // 10, len(current_chunk))  # Rough estimate
-                        current_chunk = current_chunk[-overlap_lines:] if overlap_lines > 0 else []
+                        overlap_content = current_chunk[-overlap_lines:] if overlap_lines > 0 else []
+                        
+                        # Update overlap metadata for the previous chunk if there's overlap
+                        if overlap_lines > 0:
+                            chunks[-1]['metadata']['processing_metadata']['chunk_overlap_end'] = overlap_lines
+                        
+                        current_chunk = overlap_content.copy() if overlap_content else []
                         current_size = sum(len(l.split()) for l in current_chunk)
+                        chunk_start_line = chunk_end_line - len(current_chunk) + 1
                         chunk_part += 1
+                        
+                        # Update overlap metadata for the new chunk if there's overlap
+                        if overlap_lines > 0 and current_chunk:
+                            chunks[-1]['metadata']['processing_metadata']['chunk_overlap_start'] = overlap_lines
                     
                     current_chunk.append(line)
                     current_size += line_size
@@ -168,6 +232,7 @@ class ImprovedCodeChunker:
                 # Add the last chunk if there's anything left
                 if current_chunk:
                     chunk_text = '\n'.join(current_chunk)
+                    chunk_end_line = chunk_start_line + len(current_chunk) - 1
                     
                     # Generate a logical chunk ID
                     chunk_id = self._generate_chunk_id(
@@ -181,15 +246,65 @@ class ImprovedCodeChunker:
                     # Calculate a logical chunk index
                     chunk_index = len(chunks)
                     
-                    chunk_metadata = metadata.copy()
-                    chunk_metadata.update({
-                        'chunk_id': chunk_id,
-                        'chunk_index': chunk_index,
-                        'code_unit_type': unit_type,
-                        'code_unit_name': unit_name,
-                        'code_unit_part': chunk_part,
-                        'language': language
-                    })
+                    # Create content hash
+                    content_hash = hashlib.md5(chunk_text.encode()).hexdigest()
+                    
+                    # Extract file information
+                    file_path = metadata.get('path', '')
+                    file_name = file_path.split('/')[-1] if file_path else ''
+                    file_extension = file_name.split('.')[-1] if '.' in file_name else ''
+                    
+                    # Prepare unified metadata schema
+                    chunk_metadata = {
+                        # Core Schema Structure
+                        'id': chunk_id,
+                        'source_system': 'gitlab',
+                        'entity_type': 'code',
+                        'entity_subtype': unit_type,
+                        'title': f'{unit_type} {unit_name}' if unit_name != 'whole_file' else file_name,
+                        'content_to_embed': chunk_text,
+                        'content_summary': docstring if docstring else None,
+                        'created_at': metadata.get('created_at', None),
+                        'updated_at': metadata.get('updated_at', None),
+                        'author_name': metadata.get('author_name', ''),
+                        'author_id': metadata.get('author_id', ''),
+                        'author_email': metadata.get('author_email', None),
+                        'web_url': metadata.get('web_url', ''),
+                        'tags_or_labels': metadata.get('tags_or_labels', []),
+                        'project_identifier': metadata.get('project_id', ''),
+                        'project_name': metadata.get('project_name', ''),
+                        'project_web_url': metadata.get('project_web_url', None),
+                        'parent_entity_id': metadata.get('parent_entity_id', None),
+                        'related_entity_ids': metadata.get('related_entity_ids', []),
+                        'content_hash': content_hash,
+                        'processing_metadata': {
+                            'chunk_index': chunk_index,
+                            'total_chunks': total_chunks,
+                            'chunk_overlap_start': 0,  # Will be updated for overlapping chunks
+                            'chunk_overlap_end': 0     # Will be updated for overlapping chunks
+                        },
+                        
+                        # GitLab Code-Specific Fields
+                        'gitlab_code': {
+                            'file_path': file_path,
+                            'file_name': file_name,
+                            'file_extension': file_extension,
+                            'programming_language': language,
+                            'code_unit_type': unit_type,
+                            'code_unit_name': unit_name,
+                            'git_reference': metadata.get('git_reference', ''),
+                            'commit_sha': metadata.get('commit_sha', ''),
+                            'repository_url': metadata.get('repository_url', ''),
+                            'start_line_number': chunk_start_line,
+                            'end_line_number': chunk_end_line,
+                            'total_lines': chunk_end_line - chunk_start_line + 1,
+                            'has_docstring': bool(docstring),
+                            'complexity_score': None,
+                            'dependencies': [],
+                            'api_endpoints': [],
+                            'test_coverage': None
+                        }
+                    }
                     
                     chunks.append({
                         'content': chunk_text,
@@ -208,22 +323,68 @@ class ImprovedCodeChunker:
                 # Calculate a logical chunk index
                 chunk_index = len(chunks)
                 
-                chunk_metadata = metadata.copy()
-                chunk_metadata.update({
-                    'chunk_id': chunk_id,
-                    'chunk_index': chunk_index,
-                    'code_unit_type': unit_type,
-                    'code_unit_name': unit_name,
-                    'language': language
-                })
+                # Create content hash
+                content_hash = hashlib.md5(unit_content.encode()).hexdigest()
                 
-                # Add docstring to content if available
-                content = unit_content
-                if docstring:
-                    chunk_metadata['has_docstring'] = True
+                # Extract file information
+                file_path = metadata.get('path', '')
+                file_name = file_path.split('/')[-1] if file_path else ''
+                file_extension = file_name.split('.')[-1] if '.' in file_name else ''
+                
+                # Prepare unified metadata schema
+                chunk_metadata = {
+                    # Core Schema Structure
+                    'id': chunk_id,
+                    'source_system': 'gitlab',
+                    'entity_type': 'code',
+                    'entity_subtype': unit_type,
+                    'title': f'{unit_type} {unit_name}' if unit_name != 'whole_file' else file_name,
+                    'content_to_embed': unit_content,
+                    'content_summary': docstring if docstring else None,
+                    'created_at': metadata.get('created_at', None),
+                    'updated_at': metadata.get('updated_at', None),
+                    'author_name': metadata.get('author_name', ''),
+                    'author_id': metadata.get('author_id', ''),
+                    'author_email': metadata.get('author_email', None),
+                    'web_url': metadata.get('web_url', ''),
+                    'tags_or_labels': metadata.get('tags_or_labels', []),
+                    'project_identifier': metadata.get('project_id', ''),
+                    'project_name': metadata.get('project_name', ''),
+                    'project_web_url': metadata.get('project_web_url', None),
+                    'parent_entity_id': metadata.get('parent_entity_id', None),
+                    'related_entity_ids': metadata.get('related_entity_ids', []),
+                    'content_hash': content_hash,
+                    'processing_metadata': {
+                        'chunk_index': chunk_index,
+                        'total_chunks': total_chunks,
+                        'chunk_overlap_start': 0,
+                        'chunk_overlap_end': 0
+                    },
+                    
+                    # GitLab Code-Specific Fields
+                    'gitlab_code': {
+                        'file_path': file_path,
+                        'file_name': file_name,
+                        'file_extension': file_extension,
+                        'programming_language': language,
+                        'code_unit_type': unit_type,
+                        'code_unit_name': unit_name,
+                        'git_reference': metadata.get('git_reference', ''),
+                        'commit_sha': metadata.get('commit_sha', ''),
+                        'repository_url': metadata.get('repository_url', ''),
+                        'start_line_number': start_line,
+                        'end_line_number': end_line,
+                        'total_lines': end_line - start_line,
+                        'has_docstring': bool(docstring),
+                        'complexity_score': None,
+                        'dependencies': [],
+                        'api_endpoints': [],
+                        'test_coverage': None
+                    }
+                }
                 
                 chunks.append({
-                    'content': content,
+                    'content': unit_content,
                     'metadata': chunk_metadata
                 })
         
