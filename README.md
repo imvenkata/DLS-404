@@ -252,9 +252,11 @@ python main.py --process --group-id "group_id_1,group_id_2"
 
 ### Indexing
 
-This step indexes the chunks (which now include embeddings from the previous combined step) into Azure AI Search. It reads the data directly from `data_with_embeddings.json` located in your processed data container.
+This step indexes the chunks (which now include embeddings from the previous combined step) into Azure AI Search. It reads the data directly from the processed data in your Azure Blob Storage container.
 
-To index data:
+#### Option 1: Using the main.py script
+
+To index data using the main pipeline script:
 
 ```bash
 # For a specific project
@@ -268,6 +270,29 @@ The system will:
 1. Load the chunks with embeddings from Azure Blob Storage
 2. Create or update the search index in Azure AI Search
 3. Index the chunks in the search index
+
+#### Option 2: Using the dedicated Azure Search index creation script
+
+Alternatively, you can use the dedicated script to create and populate an Azure AI Search index from processed data in blob storage:
+
+```bash
+# Create a new index and index all processed blobs
+python scripts/create_azure_search_index_final.py --recreate-index
+
+# Create a new index with a custom name
+python scripts/create_azure_search_index_final.py --recreate-index --index-name "custom-index-name"
+
+# Process only a limited number of blobs (useful for testing)
+python scripts/create_azure_search_index_final.py --recreate-index --max-blobs 10
+```
+
+This script:
+1. Creates a search index with vector search capabilities
+2. Configures fields for content (for full-text search) and embeddings (for vector search)
+3. Processes data from individual blobs in Azure Blob Storage
+4. Properly formats the data for Azure AI Search indexing
+
+The script is particularly useful when you have individual processed files in blob storage rather than a single aggregated file.
 
 ### Running the Complete Pipeline
 
@@ -323,6 +348,19 @@ curl -X POST http://localhost:8000/api/query \
   -H "Content-Type: application/json" \
   -d '{"query": "What are the recent issues in the project?"}'
 ```
+
+
+## Indexing 
+
+# Using a local processed data file
+python scripts/create_azure_search_index.py --processed-data /path/to/processed_data.json
+
+# Using data from blob storage
+python scripts/create_azure_search_index.py --blob-container gitlab-processed
+
+# To recreate an existing index
+python scripts/create_azure_search_index.py --processed-data /path/to/processed_data.json --recreate-index
+
 
 ## Azure Functions Deployment
 
