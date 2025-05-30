@@ -1,4 +1,26 @@
+#!/usr/bin/env python
+"""
+Script to fix the Azure Search client implementation to be compatible with the installed SDK version.
+"""
+import os
+import sys
+import shutil
 
+# Path to the azure_search.py file
+SEARCH_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                               "search", "azure_search.py")
+
+def fix_azure_search_file():
+    """Fix the Azure Search client implementation."""
+    print(f"Fixing Azure Search client at {SEARCH_FILE_PATH}")
+    
+    # Create a backup of the original file
+    backup_path = SEARCH_FILE_PATH + ".backup2"
+    shutil.copy2(SEARCH_FILE_PATH, backup_path)
+    print(f"Created backup at {backup_path}")
+    
+    # Create the new azure_search.py file with fixed implementation
+    new_content = '''
 # Azure Search client implementation
 import os
 import logging
@@ -240,3 +262,13 @@ class AzureSearchClient:
         except Exception as e:
             logger.error(f"Error performing vector search: {str(e)}")
             return []
+'''
+    
+    # Write the new content to the file
+    with open(SEARCH_FILE_PATH, 'w') as f:
+        f.write(new_content)
+    
+    print("Fixed Azure Search client successfully")
+
+if __name__ == "__main__":
+    fix_azure_search_file()

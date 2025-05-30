@@ -1,0 +1,114 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Agentic RAG Service</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        .query-form {
+            margin-bottom: 20px;
+        }
+        .query-input {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        .submit-button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .response {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+        .sources {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #eef6ff;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        .source-item {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        .source-item:last-child {
+            border-bottom: none;
+        }
+        .citation {
+            font-size: 0.8em;
+            color: #3498db;
+            cursor: pointer;
+            vertical-align: super;
+            font-weight: bold;
+        }
+        .actions {
+            margin-top: 20px;
+            border-top: 1px solid #ddd;
+            padding-top: 20px;
+        }
+        .action {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Agentic RAG Service</h1>
+    <div class="query-form">
+        <form action="/query" method="post">
+            <input type="text" name="query" placeholder="Enter your query..." class="query-input" required>
+            <button type="submit" class="submit-button">Submit</button>
+        </form>
+    </div>
+    {% if response %}
+    <div class="response">
+        <h2>Response:</h2>
+        {{ response | safe }}
+    </div>
+    {% endif %}
+    {% if sources %}
+    <div class="sources">
+        <h2>Sources:</h2>
+        {% for source in sources %}
+        <div class="source-item">
+            <strong>[{{ loop.index }}]</strong> {{ source.title | default('Untitled Document') }}
+            <p><strong>Source:</strong> {{ source.source_id | default('Unknown') }}</p>
+            <p><strong>Content:</strong> {{ source.content[:200] }}{% if source.content|length > 200 %}...{% endif %}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% if actions %}
+    <div class="actions">
+        <h2>Actions Taken:</h2>
+        {% for action in actions %}
+        <div class="action">
+            <strong>{{ action.action }}</strong>
+            <p>{{ action.result }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</body>
+</html>
+    

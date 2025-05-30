@@ -1,12 +1,34 @@
+#!/usr/bin/env python
+"""
+Script to fix the Azure Search client implementation to properly handle vector search.
+"""
+import os
+import sys
+import shutil
 
+# Path to the azure_search.py file
+SEARCH_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                               "search", "azure_search.py")
+
+def fix_azure_search_file():
+    """Fix the Azure Search client implementation."""
+    print(f"Fixing Azure Search client at {SEARCH_FILE_PATH}")
+    
+    # Create a backup of the original file
+    backup_path = SEARCH_FILE_PATH + ".backup"
+    shutil.copy2(SEARCH_FILE_PATH, backup_path)
+    print(f"Created backup at {backup_path}")
+    
+    # Create the new azure_search.py file with fixed implementation
+    new_content = '''
 # Azure Search client implementation
 import os
 import logging
-import json
 from typing import Dict, List, Any, Optional, Union
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
+from azure.search.documents.models import Vector
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -167,7 +189,7 @@ class AzureSearchClient:
         top: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Perform vector search using REST API directly.
+        Perform vector search.
         
         Args:
             query: Query text
@@ -179,9 +201,6 @@ class AzureSearchClient:
             List of search results
         """
         try:
-            # Since we can't use the Vector class directly, we'll use the search method
-            # with a hybrid approach that includes both text and vector search
-            
             # Prepare filter string if filters are provided
             filter_string = None
             if filters:
@@ -195,29 +214,21 @@ class AzureSearchClient:
                 if filter_parts:
                     filter_string = " and ".join(filter_parts)
             
-            # Create search options
-            search_options = {
-                "top": top,
-                "filter": filter_string,
-                "include_total_count": True
-            }
+            # Create vector query
+            vector = Vector(
+                value=embedding,
+                k=top,
+                fields=self.vector_field_name
+            )
             
-            # Add select fields if needed
-            # search_options["select"] = "id,content,source_id,entity_type,title,author_name,created_at"
-            
-            # Perform hybrid search (text + semantic)
-            if query:
-                # If we have a text query, use it
-                results = self.search_client.search(
-                    search_text=query,
-                    **search_options
-                )
-            else:
-                # If no text query, use an empty string
-                results = self.search_client.search(
-                    search_text="*",
-                    **search_options
-                )
+            # Perform search
+            results = self.search_client.search(
+                search_text=None,  # No text query for pure vector search
+                filter=filter_string,
+                top=top,
+                vectors=[vector],
+                include_total_count=True
+            )
             
             # Process results
             search_results = []
@@ -235,8 +246,18 @@ class AzureSearchClient:
                         
                 search_results.append(doc)
             
-            logger.info(f"Found {len(search_results)} results for hybrid query")
+            logger.info(f"Found {len(search_results)} results for vector query")
             return search_results
         except Exception as e:
             logger.error(f"Error performing vector search: {str(e)}")
             return []
+'''
+    
+    # Write the new content to the file
+    with open(SEARCH_FILE_PATH, 'w') as f:
+        f.write(new_content)
+    
+    print("Fixed Azure Search client successfully")
+
+if __name__ == "__main__":
+    fix_azure_search_file()

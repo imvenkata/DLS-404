@@ -1,6 +1,6 @@
 # GitLab RAG Application with Azure Services
 
-This repository contains a modular implementation of a Retrieval-Augmented Generation (RAG) application that uses GitLab data sources and Azure services.
+This repository contains a modular implementation of a Retrieval-Augmented Generation (RAG) application that uses GitLab data sources and Azure services. The application includes both standard RAG capabilities and an enhanced agentic RAG system that can take actions based on user queries.
 
 ## Table of Contents
 
@@ -17,12 +17,19 @@ This repository contains a modular implementation of a Retrieval-Augmented Gener
       - [Extract from All Projects in Groups](#extract-from-all-projects-in-groups)
       - [Extract Epics from Multiple Groups](#extract-epics-from-multiple-groups)
       - [Combined Extraction](#combined-extraction)
+    - [Configuring Extractors](#configuring-extractors)
+    - [Optimized Pipeline (Without Commits)](#optimized-pipeline-without-commits)
     - [Processing, Chunking, and Embedding](#processing-chunking-and-embedding)
     - [Indexing](#indexing)
     - [Running the Complete Pipeline](#running-the-complete-pipeline)
     - [Running Only Data Extraction and Ingestion (No RAG)](#running-only-data-extraction-and-ingestion-no-rag)
     - [API Server](#api-server)
       - [Query Example](#query-example)
+  - [Agentic RAG System](#agentic-rag-system)
+    - [Configuring the Agent](#configuring-the-agent)
+    - [Running the Agentic RAG Service](#running-the-agentic-rag-service)
+    - [Testing the Agent](#testing-the-agent)
+    - [Cited Answers](#cited-answers)
   - [Azure Functions Deployment](#azure-functions-deployment)
   - [Demo Setup](#demo-setup)
   - [Troubleshooting](#troubleshooting)
@@ -33,9 +40,10 @@ This repository contains a modular implementation of a Retrieval-Augmented Gener
 ## Project Structure
 
 ```
-gitlab-rag-poc/
+DLS-404/
 ├── config/
-│   └── config.py                 # Central configuration module
+│   ├── config.py                 # Central configuration module
+│   └── extractor_config.json     # Configuration for enabled extractors
 ├── extractors/
 │   ├── __init__.py
 │   ├── gitlab_extractor.py       # Base GitLab extractor class
@@ -56,19 +64,32 @@ gitlab-rag-poc/
 │   └── azure_search.py           # Azure AI Search integration
 ├── rag/
 │   ├── __init__.py
-│   └── rag_pipeline.py           # RAG pipeline implementation
+│   ├── rag_pipeline.py           # RAG pipeline implementation
+│   └── agentic/                  # Agentic RAG components
+│       ├── __init__.py
+│       ├── agent.py              # AgentRAG implementation
+│       ├── actions.py            # GitLab and Confluence actions
+│       └── planner.py            # Action planning for queries
 ├── api/
 │   ├── __init__.py
 │   ├── main.py                   # FastAPI application
 │   └── router.py                 # API endpoints
-├── azure_functions/
-│   ├── GitlabExtractorFunction/  # Azure Function for data extraction
-│   ├── ChunkingFunction/         # Azure Function for chunking
-│   ├── EmbeddingFunction/        # Azure Function for embedding generation
-│   └── RagApiFunction/           # Azure Function for RAG API
-└── scripts/
-    ├── setup_azure_resources.py  # Script for setting up Azure resources
-    └── initialize_pipeline.py    # Script for initializing the RAG pipeline
+├── tools/                        # Utility tools
+│   ├── configure_extractors.py   # Tool to enable/disable extractors
+│   ├── extraction_manager.py     # Extraction pipeline manager
+│   ├── query_rag.py              # Simple RAG query tool
+│   ├── run_optimized_pipeline.py # Optimized pipeline without commits
+│   ├── run_rag_service.py        # Web interface for RAG service
+│   └── templates/                # HTML templates for web interface
+├── scripts/                      # Core scripts
+│   ├── cleanup_repo.py           # Repository cleanup utility
+│   ├── create_azure_search_index.py # Index creation script
+│   ├── initialize_pipeline.py    # Pipeline initialization
+│   ├── run_agentic_rag.py        # Run agentic RAG system
+│   ├── setup_azure_resources.py  # Azure resource setup
+│   └── test_rag_system.py        # Test system for RAG
+└── docs/                         # Documentation
+    └── agentic_rag_improvements.md # Agentic RAG system improvements
 ```
 
 ## Features
@@ -81,6 +102,7 @@ gitlab-rag-poc/
 - **Hybrid Search**: Combines vector and keyword search for better results
 - **Source Citations**: All answers include references to the original GitLab content
 - **Flexible Deployment**: Can be deployed as a web service or Azure Functions
+- **Agentic RAG**: Enhanced system that can take actions based on user queries
 
 ## Prerequisites
 
@@ -125,8 +147,8 @@ gitlab-rag-poc/
    # Azure OpenAI Configuration
    AZURE_OPENAI_ENDPOINT=https://your-openai-service.openai.azure.com/
    AZURE_OPENAI_KEY=your_openai_key
-   AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-ada-002
-   AZURE_OPENAI_EMBEDDING_MODEL=text-embedding-ada-002
+   AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
+   AZURE_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
    AZURE_OPENAI_EMBEDDING_DIMENSION=1536
    AZURE_OPENAI_COMPLETION_DEPLOYMENT=gpt-35-turbo
 
@@ -203,32 +225,62 @@ python main.py --extract --group-projects-id "12345,67890"
 python main.py --extract --group-projects-id "107543236"
 ```
 
-This will:
-1. Find all projects in the specified groups
-2. Extract data from each project automatically
-
 #### Extract Epics from Multiple Groups
 
 To extract epics from multiple groups:
 
 ```bash
 python main.py --extract --group-id "12345,67890"
+
+# Example:
+python main.py --extract --group-id "107543236"
 ```
 
 #### Combined Extraction
 
-You can combine these approaches:
+You can combine these approaches to extract data from specific projects and groups:
 
 ```bash
-# Extract from specific projects AND all projects in groups
-python main.py --extract --project-id "12345,67890" --group-projects-id "54321,98765"
-
-# Extract from specific projects AND epics from groups
-python main.py --extract --project-id "12345,67890" --group-id "54321,98765"
-
-# Extract everything
 python main.py --extract --project-id "12345,67890" --group-id "54321,98765" --group-projects-id "13579,24680"
 ```
+
+### Configuring Extractors
+
+You can configure which extractors are enabled using the configuration tool. This allows you to include or exclude specific data types like commits, issues, or code files.
+
+```bash
+# Show current configuration
+python tools/configure_extractors.py --show
+
+# Disable commit extraction (recommended for better performance)
+python tools/configure_extractors.py --disable-commits
+
+# Enable commit extraction if needed
+python tools/configure_extractors.py --enable-commits
+
+# Disable other extractors if needed
+python tools/configure_extractors.py --disable-epics
+python tools/configure_extractors.py --disable-code
+```
+
+The configuration is stored in `config/extractor_config.json` and is respected by the extraction pipeline.
+
+### Optimized Pipeline (Without Commits)
+
+For better performance, you can use the optimized pipeline that excludes commits by default:
+
+```bash
+# Run the complete optimized pipeline without commits
+python tools/run_optimized_pipeline.py --all --project-id "your_project_id"
+
+# Run specific steps of the optimized pipeline
+python tools/run_optimized_pipeline.py --extract --process --project-id "your_project_id"
+
+# Include commits if needed (not recommended for initial setup)
+python tools/run_optimized_pipeline.py --all --project-id "your_project_id" --enable-commits
+```
+
+Excluding commits significantly improves performance and reduces noise in search results, as commit data tends to be verbose and less semantically meaningful than issues, merge requests, and code files.
 
 ### Processing, Chunking, and Embedding
 
@@ -264,68 +316,43 @@ python main.py --index --project-id your_project_id
 
 # For multiple projects
 python main.py --index --project-id "project_id_1,project_id_2"
+
+# For all data that has been processed
+python main.py --index
 ```
 
-The system will:
-1. Load the chunks with embeddings from Azure Blob Storage
-2. Create or update the search index in Azure AI Search
-3. Index the chunks in the search index
+#### Option 2: Using the create_azure_search_index.py script
 
-#### Option 2: Using the dedicated Azure Search index creation script
-
-Alternatively, you can use the dedicated script to create and populate an Azure AI Search index from processed data in blob storage:
+This script provides more control over the indexing process:
 
 ```bash
-# Create a new index and index all processed blobs
-python scripts/create_azure_search_index_final.py --recreate-index
-
-# Create a new index with a custom name
-python scripts/create_azure_search_index_final.py --recreate-index --index-name "custom-index-name"
-
-# Process only a limited number of blobs (useful for testing)
-python scripts/create_azure_search_index_final.py --recreate-index --max-blobs 10
+python scripts/create_azure_search_index.py
 ```
-
-This script:
-1. Creates a search index with vector search capabilities
-2. Configures fields for content (for full-text search) and embeddings (for vector search)
-3. Processes data from individual blobs in Azure Blob Storage
-4. Properly formats the data for Azure AI Search indexing
-
-The script is particularly useful when you have individual processed files in blob storage rather than a single aggregated file.
 
 ### Running the Complete Pipeline
 
-To run the complete pipeline (extract, process, embed, index):
+To run the complete pipeline (extract, process, embed, and index) in one go:
 
 ```bash
+# For a specific project
 python main.py --all --project-id your_project_id
-```
 
-For multiple projects:
+# For multiple projects
+python main.py --all --project-id "project_id_1,project_id_2"
 
-```bash
-python main.py --all --project-id "12345,67890" --group-id "54321,98765" --group-projects-id "13579,24680"
+# For all projects in a group
+python main.py --all --group-projects-id "group_id_1,group_id_2"
+
+# For epics in a group
+python main.py --all --group-id "group_id_1,group_id_2"
 ```
 
 ### Running Only Data Extraction and Ingestion (No RAG)
 
-If you want to run only the data extraction and ingestion parts (excluding the RAG query functionality):
+If you only need to extract and ingest data without setting up the RAG components:
 
 ```bash
-python main.py --extract --process --embed --index --project-id "your_project_id"
-```
-
-For multiple projects:
-
-```bash
-python main.py --extract --process --embed --index --project-id "12345,67890" --group-projects-id "54321"
-```
-
-If you only want to run the extraction and processing (without embedding or indexing):
-
-```bash
-python main.py --extract --process --project-id "your_project_id"
+python main.py --extract --process --index --project-id your_project_id
 ```
 
 ### API Server
@@ -333,49 +360,104 @@ python main.py --extract --process --project-id "your_project_id"
 To start the API server:
 
 ```bash
-python main.py --api --host 0.0.0.0 --port 8000
+python api/main.py
 ```
 
-The API server provides the following endpoints:
-- `GET /api/health`: Health check endpoint
-- `POST /api/query`: Query endpoint for RAG
-- `POST /api/index`: Index endpoint for triggering data extraction and indexing
+This will start a FastAPI server with the following endpoints:
+
+- `GET /health`: Health check endpoint
+- `POST /query`: Query endpoint for RAG
 
 #### Query Example
 
 ```bash
-curl -X POST http://localhost:8000/api/query \
+curl -X POST "http://localhost:8000/query" \
   -H "Content-Type: application/json" \
-  -d '{"query": "What are the recent issues in the project?"}'
+  -d '{"query": "What are the open issues in the project?"}'
 ```
 
+## Agentic RAG System
 
-## Indexing 
+The agentic RAG system enhances the standard RAG capabilities by adding the ability to take actions based on user queries. It can retrieve information from Azure Search and execute actions like listing GitLab issues, epics, and more.
 
-# Using a local processed data file
-python scripts/create_azure_search_index.py --processed-data /path/to/processed_data.json
+### Configuring the Agent
 
-# Using data from blob storage
-python scripts/create_azure_search_index.py --blob-container gitlab-processed
+The agent uses the same Azure OpenAI and Azure Search configurations as the standard RAG system. Make sure your `.env` file has the correct settings:
 
-# To recreate an existing index
-python scripts/create_azure_search_index.py --processed-data /path/to/processed_data.json --recreate-index
+```
+# Azure OpenAI Configuration
+AZURE_OPENAI_ENDPOINT=https://hackathon-team404.cognitiveservices.azure.com/
+AZURE_OPENAI_KEY=your_openai_key
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
+AZURE_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+AZURE_OPENAI_EMBEDDING_DIMENSION=1536
+AZURE_OPENAI_COMPLETION_DEPLOYMENT=gpt-35-turbo
 
+# Azure Search Configuration
+AZURE_SEARCH_ENDPOINT=https://team404-search.search.windows.net
+AZURE_SEARCH_KEY=your_search_key
+AZURE_SEARCH_INDEX_NAME=gitlab-index
+```
+
+### Running the Agentic RAG Service
+
+You can run the agentic RAG service with a web interface:
+
+```bash
+# Start the web interface on port 8001
+python tools/run_rag_service.py
+```
+
+This will start a web server at http://localhost:8001 where you can enter queries and see responses with citations.
+
+### Testing the Agent
+
+You can test the agentic RAG system using the provided test scripts:
+
+```bash
+# Test with a specific query
+python scripts/query_rag.py --query "How does the chunking system work?"
+
+# Interactive testing
+python scripts/test_rag_system.py --interactive
+
+# Run predefined test queries
+python scripts/test_rag_system.py
+```
+
+### Cited Answers
+
+The agentic RAG system provides cited answers, linking statements to their source documents. This helps users verify the information and trace it back to the original GitLab content.
+
+When using the web interface, you'll see:
+- Citation markers ([1], [2], etc.) in the response
+- A "Sources" section with details about each cited document
+- Links to the original GitLab content where available
 
 ## Azure Functions Deployment
 
-The application can also be deployed as Azure Functions:
-
-1. Set up Azure Functions Core Tools
-2. Deploy each function:
-   ```
-   cd azure_functions/GitlabExtractorFunction
-   func azure functionapp publish your-function-app
-   ```
+The application can be deployed as Azure Functions for more scalable and event-driven processing. Refer to the Azure Functions documentation for deployment instructions.
 
 ## Demo Setup
 
-For detailed instructions on setting up demo accounts and testing the application, see [DEMO_SETUP.md](DEMO_SETUP.md).
+For a demonstration setup, follow these steps:
+
+1. Extract data from sample projects:
+   ```bash
+   python tools/run_optimized_pipeline.py --extract --project-id "69940200,69861496"
+   ```
+
+2. Process and index the data:
+   ```bash
+   python tools/run_optimized_pipeline.py --process --index
+   ```
+
+3. Start the agentic RAG service:
+   ```bash
+   python tools/run_rag_service.py
+   ```
+
+4. Open http://localhost:8001 in your browser to interact with the system.
 
 ## Troubleshooting
 
@@ -388,8 +470,13 @@ For detailed instructions on setting up demo accounts and testing the applicatio
 
 ### Logs
 
-Check the application logs for detailed error messages and debugging information.
+Check the logs for detailed error messages:
+
+```bash
+# Set more verbose logging
+export PYTHONVERBOSE=1
+```
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.
