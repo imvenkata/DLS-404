@@ -2,6 +2,11 @@
 
 This repository contains a modular implementation of a Retrieval-Augmented Generation (RAG) application that uses GitLab data sources and Azure services. The application includes both standard RAG capabilities and an enhanced agentic RAG system that can take actions based on user queries.
 
+## Latest Updates
+
+- **Semantic Kernel 1.32.0 Compatibility**: The agentic RAG system has been fully updated to work with Semantic Kernel 1.32.0, including new function invocation patterns and robust JSON parsing.
+- **Enhanced Issue Creation Workflow**: The issue creation process now requires detailed project and epic information before creating issues, ensuring proper context and linking.
+
 ## Table of Contents
 
 - [GitLab RAG Application with Azure Services](#gitlab-rag-application-with-azure-services)
@@ -378,7 +383,27 @@ curl -X POST "http://localhost:8000/query" \
 
 ## Agentic RAG System
 
-The agentic RAG system enhances the standard RAG capabilities by adding the ability to take actions based on user queries. It can retrieve information from Azure Search and execute actions like listing GitLab issues, epics, and more.
+The agentic RAG system enhances the standard RAG capabilities by adding the ability to take actions based on user queries. It can retrieve information from Azure Search and execute actions like listing GitLab issues, creating issues, and more.
+
+### Semantic Kernel 1.32.0 Integration
+
+The system has been fully updated to work with Semantic Kernel 1.32.0, including:
+
+- Using `KernelArguments` for passing function arguments
+- Direct function registration with `kernel.add_function(plugin_name, function)`
+- Updated function invocation with the new `invoke` method
+- Robust JSON parsing with code fence marker handling
+- Detailed logging of function result types and values
+
+### Enhanced Issue Creation
+
+The issue creation workflow has been improved to:
+
+- Require detailed project and epic information before creating issues
+- Explicitly check for missing required fields and prompt for them
+- Handle both regular issues and user stories with the same validation requirements
+- Provide clear, specific error messages when required information is missing
+- Include source citations in knowledge discovery responses
 
 ### Configuring the Agent
 
@@ -476,6 +501,21 @@ Check the logs for detailed error messages:
 # Set more verbose logging
 export PYTHONVERBOSE=1
 ```
+
+
+## ßProject Overview
+The DLS-404 GitLab RAG application is a sophisticated system that combines:
+
+Retrieval-Augmented Generation (RAG) for GitLab data
+Agentic workflows powered by Semantic Kernel
+Knowledge Assistant for interactive querying and issue management
+The system has several key components:
+
+KnowledgeAssistant: Core class that manages agentic workflows
+AgentRAG: Handles retrieval-augmented generation
+GitLabMCPAgent: Provides secure GitLab operations through a Managed Content Provider
+Azure OpenAI integration for embeddings and completions
+Azure Search for vector storage and retrieval
 
 ## License
 
