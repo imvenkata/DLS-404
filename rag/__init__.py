@@ -1,8 +1,12 @@
 """
 RAG package for retrieval-augmented generation pipeline.
+This package focuses on the agentic RAG implementation using Semantic Kernel.
 """
-from .rag_pipeline import RagPipeline
+from .agentic.agent import AgentRAG
+from .agentic.actions import GitLabActions, ConfluenceActions
 
 __all__ = [
-    'RagPipeline'
+    'AgentRAG',
+    'GitLabActions',
+    'ConfluenceActions'
 ]
