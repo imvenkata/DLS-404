@@ -240,3 +240,60 @@ class AzureSearchClient:
         except Exception as e:
             logger.error(f"Error performing vector search: {str(e)}")
             return []
+    
+    def index_chunks(self, chunks: List[Dict[str, Any]]) -> bool:
+        """
+        Index chunks in Azure AI Search.
+        
+        Args:
+            chunks: List of chunks to index
+            
+        Returns:
+            True if indexing was successful, False otherwise
+        """
+        if not self.search_client:
+            logger.error("Search client not initialized")
+            return False
+        
+        try:
+            # Process chunks to ensure they have the required fields
+            documents = []
+            for chunk in chunks:
+                # Ensure chunk has an ID field
+                if self.id_field_name not in chunk:
+                    if 'chunk_id' in chunk:
+                        chunk[self.id_field_name] = chunk['chunk_id']
+                    else:
+                        logger.warning(f"Chunk missing ID field, skipping: {chunk}")
+                        continue
+                
+                # Ensure chunk has a content field
+                if self.content_field_name not in chunk and 'content' in chunk:
+                    chunk[self.content_field_name] = chunk['content']
+                
+                # Ensure chunk has an embedding field if vector search is used
+                if self.vector_field_name not in chunk and 'embedding' in chunk:
+                    chunk[self.vector_field_name] = chunk['embedding']
+                
+                documents.append(chunk)
+            
+            if not documents:
+                logger.warning("No valid documents to index")
+                return False
+            
+            # Upload documents in batches to avoid size limits
+            batch_size = 100
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
+                try:
+                    self.search_client.upload_documents(documents=batch)
+                    logger.info(f"Indexed batch of {len(batch)} documents")
+                except Exception as e:
+                    logger.error(f"Error indexing batch: {str(e)}")
+                    return False
+            
+            logger.info(f"Successfully indexed {len(documents)} documents")
+            return True
+        except Exception as e:
+            logger.error(f"Error indexing chunks: {str(e)}")
+            return False

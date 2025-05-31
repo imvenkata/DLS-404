@@ -42,28 +42,47 @@ class CodeExtractor(GitLabExtractor):
             if file_extensions is None:
                 file_extensions = CODE_FILE_EXTENSIONS
             
-            # Get repository tree
+            # First, determine which branch to use for the entire extraction
+            used_branch = ref
+            items = None
+            
+            # Try with the specified ref first
             try:
-                # First try with the specified ref
-                items = project.repository_tree(path=path, ref=ref, recursive=True, all=True)
+                items = project.repository_tree(path=path, ref=used_branch, recursive=True, all=True)
+                logger.info(f"Successfully retrieved repository tree using branch: {used_branch}")
             except Exception as e:
-                logger.warning(f"Failed to get repository tree for project {project_id} with ref '{ref}': {str(e)}")
-                # If that fails, try to get the default branch
+                logger.warning(f"Failed to get repository tree for project {project_id} with ref '{used_branch}': {str(e)}")
+                
+                # Try to get the default branch
                 try:
                     default_branch = project.default_branch
-                    logger.info(f"Trying with default branch: {default_branch}")
-                    if default_branch:
-                        try:
-                            items = project.repository_tree(path=path, ref=default_branch, recursive=True, all=True)
-                        except Exception as e2:
-                            logger.error(f"Failed to get repository tree for project {project_id} with default branch '{default_branch}': {str(e2)}")
+                    if default_branch and default_branch != used_branch:
+                        used_branch = default_branch
+                        logger.info(f"Trying default branch: {used_branch}")
+                        items = project.repository_tree(path=path, ref=used_branch, recursive=True, all=True)
+                        logger.info(f"Successfully retrieved repository tree using default branch: {used_branch}")
+                except Exception as e2:
+                    logger.warning(f"Failed to get repository tree with default branch: {str(e2)}")
+                    
+                    # Try to list branches and use the first one
+                    try:
+                        branches = project.branches.list()
+                        if branches:
+                            used_branch = branches[0].name
+                            logger.info(f"Trying first available branch: {used_branch}")
+                            items = project.repository_tree(path=path, ref=used_branch, recursive=True, all=True)
+                            logger.info(f"Successfully retrieved repository tree using branch: {used_branch}")
+                        else:
+                            logger.error(f"No branches found for project {project_id}")
                             return []
-                    else:
-                        logger.error(f"No default branch found for project {project_id}")
+                    except Exception as e3:
+                        logger.error(f"Failed to list branches for project {project_id}: {str(e3)}")
                         return []
-                except Exception as e3:
-                    logger.error(f"Failed to get default branch for project {project_id}: {str(e3)}")
-                    return []
+            
+            # If we couldn't get the repository tree with any branch, return empty list
+            if items is None:
+                logger.error(f"Could not retrieve repository tree for project {project_id} with any branch")
+                return []
             
             for item in items:
                 if item['type'] == 'blob':  # Only process files, not directories
@@ -75,47 +94,34 @@ class CodeExtractor(GitLabExtractor):
                             continue
                     
                     try:
-                        # Get file content
+                        # Get file content using the same branch we used for the repository tree
+                        logger.debug(f"Getting file content for {file_path} using branch: {used_branch}")
+                        file_content = project.files.get(file_path=file_path, ref=used_branch)
+                        
+                        # The python-gitlab API returns file content in base64 format
+                        # We need to get the content and decode it from base64
                         try:
-                            # Try to get file content with the specified ref first
+                            # Get the content as base64 and decode it
+                            content_base64 = file_content.content
+                            # Decode from base64
+                            content_bytes = base64.b64decode(content_base64)
+                            # Try to decode as UTF-8
                             try:
-                                file_content = project.files.get(file_path=file_path, ref=ref)
-                            except Exception as ref_e:
-                                # If that fails, try with the default branch
-                                logger.warning(f"Failed to get file with ref '{ref}': {str(ref_e)}")
-                                default_branch = project.default_branch
-                                if default_branch and default_branch != ref:
-                                    logger.info(f"Trying to get file with default branch: {default_branch}")
-                                    file_content = project.files.get(file_path=file_path, ref=default_branch)
-                                else:
-                                    # Try with the master branch as a last resort
-                                    logger.info("Trying to get file with 'master' branch")
-                                    file_content = project.files.get(file_path=file_path, ref='master')
-                            
-                            # The python-gitlab API returns file content in base64 format
-                            # We need to get the content and decode it from base64
-                            try:
-                                # Get the content as base64 and decode it
-                                content_base64 = file_content.content
-                                # Decode from base64
-                                content_bytes = base64.b64decode(content_base64)
-                                # Try to decode as UTF-8
+                                content = content_bytes.decode('utf-8')
+                            except UnicodeDecodeError:
+                                # If UTF-8 fails, try Latin-1 as it can decode any byte sequence
                                 try:
-                                    content = content_bytes.decode('utf-8')
-                                except UnicodeDecodeError:
-                                    # If UTF-8 fails, try Latin-1 as it can decode any byte sequence
-                                    try:
-                                        content = content_bytes.decode('latin-1')
-                                    except Exception:
-                                        # Last resort: just use an empty string
-                                        content = ""
-                                        logger.warning(f"Could not decode content for file {file_path}")
-                            except Exception as inner_e:
-                                logger.error(f"Error decoding file content for {file_path}: {str(inner_e)}")
-                                content = ""
-                        except Exception as e:
-                            logger.error(f"Failed to get file content for {file_path}: {str(e)}")
+                                    content = content_bytes.decode('latin-1')
+                                except Exception:
+                                    # Last resort: just use an empty string
+                                    content = ""
+                                    logger.warning(f"Could not decode content for file {file_path}")
+                        except Exception as inner_e:
+                            logger.error(f"Error decoding file content for {file_path}: {str(inner_e)}")
                             content = ""
+                    except Exception as e:
+                        logger.error(f"Failed to get file content for {file_path}: {str(e)}")
+                        content = ""
                         
                         file_data = {
                             'path': file_path,

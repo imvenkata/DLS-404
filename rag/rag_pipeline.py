@@ -8,7 +8,8 @@ from config.config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, 
     AZURE_OPENAI_COMPLETION_DEPLOYMENT,
     RAG_MAX_TOKENS, RAG_TEMPERATURE, RAG_TOP_P, 
-    RAG_MAX_CONTEXT_CHUNKS, RAG_SYSTEM_PROMPT
+    RAG_MAX_CONTEXT_CHUNKS, RAG_SYSTEM_PROMPT,
+    AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME
 )
 from processors.embeddings_generator import EmbeddingsGenerator
 from search.azure_search import AzureSearchClient
@@ -63,7 +64,11 @@ class RagPipeline:
         
         # Initialize embedding generator and search client
         self.embedding_generator = EmbeddingsGenerator()
-        self.search_client = AzureSearchClient()
+        self.search_client = AzureSearchClient(
+            endpoint=AZURE_SEARCH_ENDPOINT,
+            api_key=AZURE_SEARCH_KEY,
+            index_name=AZURE_SEARCH_INDEX_NAME
+        )
     
     def process_query(self, query: str, filters: Dict[str, Any] = None) -> Dict[str, Any]:
         """

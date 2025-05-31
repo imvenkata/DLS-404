@@ -1,7 +1,7 @@
 {
     "extractors": {
         "issues": true,
-        "merge_requests": true,
+        "merge_requests": false,
         "commits": false,
         "code": true,
         "epics": true
