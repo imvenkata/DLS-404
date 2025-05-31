@@ -25,8 +25,8 @@ class AzureSearchClient:
         endpoint: str,
         api_key: str,
         index_name: str,
-        vector_field_name: str = "embedding",
-        content_field_name: str = "content",
+        vector_field_name: str = "content_vector",
+        content_field_name: str = "original_content",
         id_field_name: str = "id"
     ):
         """
@@ -267,15 +267,69 @@ class AzureSearchClient:
                         logger.warning(f"Chunk missing ID field, skipping: {chunk}")
                         continue
                 
-                # Ensure chunk has a content field
-                if self.content_field_name not in chunk and 'content' in chunk:
-                    chunk[self.content_field_name] = chunk['content']
+                # Sanitize the document ID to ensure it only contains allowed characters
+                # Azure AI Search only allows letters, digits, underscore, dash, and equal sign
+                chunk_id = chunk.get('id') or f"chunk_{len(documents)}"
+                # Replace any disallowed characters with underscores
+                sanitized_id = ''.join(c if c.isalnum() or c in '_-=' else '_' for c in chunk_id)
                 
-                # Ensure chunk has an embedding field if vector search is used
-                if self.vector_field_name not in chunk and 'embedding' in chunk:
-                    chunk[self.vector_field_name] = chunk['embedding']
+                # Create a new document for the index with only fields that exist in the schema
+                doc = {
+                    # Required fields
+                    'id': sanitized_id,
+                    'original_content': chunk.get('content', ''),
+                    'content_vector': chunk.get('embedding', []),
+                }
                 
-                documents.append(chunk)
+                # Add metadata fields if available
+                if 'metadata' in chunk:
+                    metadata = chunk['metadata']
+                    
+                    # Map metadata fields to index fields
+                    # Only include fields that are defined in the index schema
+                    if 'id' in metadata:
+                        doc['parent_id'] = str(metadata['id'])
+                    
+                    if 'entity_type' in metadata:
+                        doc['source_type'] = str(metadata['entity_type'])
+                    
+                    if 'title' in metadata:
+                        doc['title'] = str(metadata['title'])
+                    
+                    if 'content_to_embed' in metadata:
+                        doc['content_to_embed'] = str(metadata['content_to_embed'])
+                    
+                    # Handle date fields
+                    if 'created_at' in metadata and metadata['created_at']:
+                        doc['created_at'] = metadata['created_at']
+                    
+                    if 'updated_at' in metadata and metadata['updated_at']:
+                        doc['updated_at'] = metadata['updated_at']
+                    
+                    # Map author information to the correct field names in the schema
+                    if 'author_name' in metadata:
+                        doc['author_username_gitlab'] = str(metadata['author_name'])
+                    
+                    # Map project information to the correct field names in the schema
+                    if 'project_id' in metadata:
+                        doc['project_id_gitlab'] = str(metadata['project_id'])
+                    
+                    if 'source_url' in metadata:
+                        doc['source_uri'] = str(metadata['source_url'])
+                    
+                    if 'content_summary' in metadata and metadata['content_summary']:
+                        doc['summary'] = str(metadata['content_summary'])
+                
+                # Ensure the document has the required fields
+                if self.id_field_name not in doc and 'chunk_id' in chunk:
+                    doc[self.id_field_name] = chunk['chunk_id']
+                
+                # Add the document only if it has the required fields
+                if self.id_field_name in doc and self.content_field_name in doc:
+                    documents.append(doc)
+                else:
+                    logger.warning(f"Skipping chunk missing required fields: {chunk}")
+                    continue
             
             if not documents:
                 logger.warning("No valid documents to index")
