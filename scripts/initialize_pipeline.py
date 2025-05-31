@@ -21,7 +21,7 @@ from processors.improved_code_chunker import ImprovedCodeChunker
 from processors.embeddings_generator import EmbeddingsGenerator
 from storage.blob_storage import BlobStorage
 from search.azure_search import AzureSearchClient
-from config.config import GITLAB_PROJECT_ID, GITLAB_GROUP_ID
+from config.config import GITLAB_PROJECT_ID, GITLAB_GROUP_ID, AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME
 
 # Load environment variables
 load_dotenv()
@@ -227,12 +227,20 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
     Returns:
         List of all successfully embedded chunks from all items.
     """
+    logger.info("Initializing services for chunking and embedding...")
     blob_storage = BlobStorage()
+    logger.info("BlobStorage initialized successfully")
+    
     text_chunker = ImprovedTextChunker()
+    logger.info("ImprovedTextChunker initialized successfully")
+    
     code_chunker = ImprovedCodeChunker()
+    logger.info("ImprovedCodeChunker initialized successfully")
+    
+    logger.info("Initializing EmbeddingsGenerator...")
     embeddings_generator = EmbeddingsGenerator() # Initialize early
     
-    logger.info("Initialized services for chunking and embedding.")
+    logger.info("All services initialized. Checking embedding client status...")
     if not embeddings_generator.client:
         logger.error("EmbeddingsGenerator client failed to initialize. Cannot generate embeddings.")
         # Early exit if embedding client is not available, as no items can be embedded.
@@ -480,18 +488,45 @@ def index_chunks(project_ids: Union[str, List[str]] = None):
     blob_storage = BlobStorage()
     
     # Initialize search client
-    search_client = AzureSearchClient()
+    search_client = AzureSearchClient(
+        endpoint=AZURE_SEARCH_ENDPOINT,
+        api_key=AZURE_SEARCH_KEY,
+        index_name=AZURE_SEARCH_INDEX_NAME
+    )
     
-    # Load chunks with embeddings
-    chunks_with_embeddings = blob_storage.download_processed_data("data_with_embeddings.json")
-    if not chunks_with_embeddings:
-        logger.error(f"No chunks with embeddings found")
+    # Convert string IDs to lists if needed
+    if isinstance(project_ids, str):
+        project_ids = [pid.strip() for pid in project_ids.split(',') if pid.strip()]
+    elif project_ids is None:
+        project_ids = []
+    
+    # Get all processed blobs
+    all_blobs = blob_storage.list_processed_blobs()
+    if not all_blobs:
+        logger.error("No processed blobs found in the container")
         return False
     
-    logger.info(f"Indexing {len(chunks_with_embeddings)} chunks in Azure AI Search")
+    logger.info(f"Found {len(all_blobs)} processed blobs")
+    
+    # Collect all chunks with embeddings
+    all_chunks = []
+    for blob_name in all_blobs:
+        logger.info(f"Loading chunks from {blob_name}")
+        chunks = blob_storage.download_processed_data(blob_name)
+        if chunks:
+            logger.info(f"Loaded {len(chunks)} chunks from {blob_name}")
+            all_chunks.extend(chunks)
+        else:
+            logger.warning(f"No chunks found in {blob_name}")
+    
+    if not all_chunks:
+        logger.error("No chunks with embeddings found in any processed blob")
+        return False
+    
+    logger.info(f"Indexing {len(all_chunks)} chunks in Azure AI Search")
     
     # Index chunks
-    success = search_client.index_chunks(chunks_with_embeddings)
+    success = search_client.index_chunks(all_chunks)
     
     return success
 
