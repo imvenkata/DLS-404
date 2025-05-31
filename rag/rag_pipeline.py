@@ -2,7 +2,7 @@
 RAG pipeline implementation for query handling and answer generation.
 """
 import logging
-import openai
+from openai import AzureOpenAI
 from typing import List, Dict, Any, Optional, Union
 from config.config import (
     AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, 
@@ -54,12 +54,14 @@ class RagPipeline:
         
         # Initialize OpenAI client for Azure
         if self.openai_endpoint and self.openai_key:
-            openai.api_type = "azure"
-            openai.api_base = self.openai_endpoint
-            openai.api_key = self.openai_key
-            openai.api_version = "2023-05-15"  # Update this as needed
+            self.openai_client = AzureOpenAI(
+                azure_endpoint=self.openai_endpoint,
+                api_key=self.openai_key,
+                api_version="2023-05-15"  # Update this as needed
+            )
             logger.info(f"Initialized OpenAI client for Azure endpoint: {self.openai_endpoint}")
         else:
+            self.openai_client = None
             logger.warning("Azure OpenAI credentials not provided. Answer generation will fail.")
         
         # Initialize embedding generator and search client
@@ -96,7 +98,7 @@ class RagPipeline:
                 query=query,
                 embedding=query_embedding,
                 filters=filters,
-                top_k=self.max_context_chunks
+                top=self.max_context_chunks
             )
             
             if not search_results:
@@ -164,8 +166,14 @@ class RagPipeline:
                 {"role": "user", "content": f"Question: {query}\n\nContext:{context}"}
             ]
             
-            response = openai.ChatCompletion.create(
-                engine=self.completion_deployment,
+            if not self.openai_client:
+                return {
+                    "answer": "OpenAI client not initialized. Please check your Azure OpenAI credentials.",
+                    "sources": sources
+                }
+            
+            response = self.openai_client.chat.completions.create(
+                model=self.completion_deployment,
                 messages=messages,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
