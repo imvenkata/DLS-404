@@ -153,10 +153,13 @@ Analyze the query and determine the most appropriate intent category from the fo
 
 Additionally, determine the content type the query is most likely related to:
 1. CODE - Query is about code, implementation, functions, classes, or programming concepts
-2. ISSUE - Query is about GitLab issues, bugs, or feature requests
-3. MERGE_REQUEST - Query is about merge requests or code reviews
-4. EPIC - Query is about epics or high-level planning
-5. GENERAL - Query doesn't clearly relate to a specific content type
+2. DOCUMENTATION - Query is about documentation, architecture, design, chunking strategies, or project structure
+3. ISSUE - Query is about GitLab issues, bugs, or feature requests
+4. MERGE_REQUEST - Query is about merge requests or code reviews
+5. EPIC - Query is about epics or high-level planning
+6. GENERAL - Query doesn't clearly relate to a specific content type
+
+IMPORTANT: If the query is asking about documentation, architecture, design patterns, chunking strategies, or project structure, classify it as DOCUMENTATION content type.
 
 Output your analysis as a JSON object with the following structure:
 {
@@ -281,7 +284,9 @@ Retrieved information:
 IMPORTANT INSTRUCTIONS:
 1. If the retrieved information contains the answer to the user's question:
    - Provide a clear, direct answer
-   - Include citations for each piece of information using [Source: document_name]
+   - Include citations for each piece of information
+   - When a URL is available, format citations as [Source: document_name](URL)
+   - When no URL is available, format citations as [Source: document_name]
    - Format citations inline within your answer
    - Include code examples if available
 
@@ -293,9 +298,12 @@ IMPORTANT INSTRUCTIONS:
 
 Your answer must be:
 1. Accurate - only use information from the retrieved context
-2. Well-cited - include source citations for all information
+2. Well-cited - include source citations with URLs when available
 3. Direct - answer exactly what was asked
 4. Clear - when information is not available, state this explicitly
+
+Example citation with URL: According to [Project Documentation](https://gitlab.com/dls-404/DLS-404/-/blob/main/README.md), the system uses Azure Search for indexing.
+Example citation without URL: The chunking system [Source: Code Architecture Document] divides content into logical segments.
 """
         
         # Create prompt config for technical QA
@@ -393,9 +401,23 @@ Your answer must be:
         """
         logger.info(f"Processing technical question: {query}")
         
-        # Map content_type to source_types for filtering
-        source_types = None
-        if content_type == "CODE":
+        # Check if query is about chunking strategy or documentation
+        chunking_keywords = ["chunking", "chunk", "strategy", "documentation", "docs"]
+        is_chunking_query = any(keyword in query.lower() for keyword in chunking_keywords)
+        
+        # Special handling for chunking-related queries
+        if is_chunking_query:
+            logger.info("Detected chunking-related query, bypassing content type filtering")
+            # For chunking queries, search across all source types without filtering
+            source_types = None
+            content_type = "DOCUMENTATION"
+        # Map content_type to source_types for filtering for other queries
+        elif content_type == "DOCUMENTATION":
+            # For documentation queries, search across all source types with priority on code
+            # Documentation is often stored in code repositories as markdown files
+            source_types = ["code", "issue", "merge_request", "epic"]
+            logger.info(f"Documentation query detected, searching across all source types")
+        elif content_type == "CODE":
             source_types = ["code"]
         elif content_type == "ISSUE":
             source_types = ["issue"]
@@ -404,21 +426,112 @@ Your answer must be:
         elif content_type == "EPIC":
             source_types = ["epic"]
         elif content_type == "GENERAL":
-            # For general queries, we might want to search across multiple types
-            # but prioritize code and issues
+            # For general queries, search across multiple types
             source_types = ["code", "issue", "merge_request", "epic"]
         
         # Set up filters if needed for other criteria
         filters = None
         
-        logger.info(f"Filtering search results by content type: {content_type}, source_types: {source_types}")  
+        logger.info(f"Filtering search results by content type: {content_type}, source_types: {source_types}")
         
         # 1. Retrieve relevant information from search index with filtering
         context = ""
         if self.search_client:
             try:
-                # Apply source_type filter if available
-                search_results = self.search_client.search(query, source_types=source_types, filters=filters)
+                # Generate embedding for the query using Azure OpenAI
+                from processors.embeddings_generator import EmbeddingsGenerator
+                from config.config import (
+                    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY,
+                    AZURE_OPENAI_EMBEDDING_DEPLOYMENT, AZURE_OPENAI_EMBEDDING_MODEL,
+                    AZURE_OPENAI_EMBEDDING_DIMENSION
+                )
+                
+                # Initialize embeddings generator
+                embeddings_generator = EmbeddingsGenerator(
+                    endpoint=AZURE_OPENAI_ENDPOINT,
+                    api_key=AZURE_OPENAI_KEY,
+                    deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                    model=AZURE_OPENAI_EMBEDDING_MODEL,
+                    dimension=AZURE_OPENAI_EMBEDDING_DIMENSION
+                )
+                
+                # Generate embedding for query
+                try:
+                    logger.info("Generating embedding for query")
+                    query_embedding = embeddings_generator.generate_embedding(query)
+                    logger.info(f"Generated embedding with dimension {len(query_embedding)}")
+                    
+                    # Apply source_type filter if available and use vector search
+                    search_results = self.search_client.search(
+                        query=query, 
+                        embedding=query_embedding,
+                        source_types=source_types, 
+                        filters=filters,
+                        use_vector_search=True
+                    )
+                    
+                    # If no results found with the initial filter, try a broader search
+                    if not search_results:
+                        logger.info(f"No results found with source_types={source_types}. Trying broader search with all source types.")
+                        # Try again with all source types
+                        search_results = self.search_client.search(
+                            query=query, 
+                            embedding=query_embedding,
+                            source_types=["code", "issue", "merge_request", "epic"], 
+                            filters=filters,
+                            use_vector_search=True
+                        )
+                except Exception as e:
+                    logger.error(f"Error generating embedding: {str(e)}")
+                    logger.info("Falling back to keyword search without embedding")
+                    # Fallback to keyword search without embedding
+                    search_results = self.search_client.search(
+                        query=query, 
+                        source_types=source_types, 
+                        filters=filters,
+                        use_vector_search=False
+                    )
+                    
+                    # If no results found with the initial filter, try a broader search
+                    if not search_results:
+                        logger.info(f"No results found with keyword search and source_types={source_types}. Trying broader search with all source types.")
+                        # Try again with all source types
+                        search_results = self.search_client.search(
+                            query=query, 
+                            source_types=["code", "issue", "merge_request", "epic"], 
+                            filters=filters,
+                            use_vector_search=False
+                        )
+                
+                # Process search results and try fallback strategies if needed
+                if not search_results and is_chunking_query:
+                    # Try alternative queries for chunking-related questions
+                    logger.info("No results found with original query. Trying alternative chunking-related queries.")
+                    chunking_queries = [
+                        "chunking strategy",
+                        "chunk system",
+                        "document chunking",
+                        "text chunker",
+                        "code chunker",
+                        "improved chunker"
+                    ]
+                    
+                    for chunking_query in chunking_queries:
+                        logger.info(f"Trying alternative query: {chunking_query}")
+                        try:
+                            alt_results = self.search_client.search(
+                                query=chunking_query,
+                                source_types=None,  # No source type filtering for fallback
+                                use_vector_search=False
+                            )
+                            
+                            if alt_results:
+                                logger.info(f"Found {len(alt_results)} results with alternative query: {chunking_query}")
+                                search_results = alt_results
+                                break
+                        except Exception as e:
+                            logger.error(f"Error with alternative query: {str(e)}")
+                
                 if search_results:
                     # Format search results with source information for better citations
                     formatted_results = []
@@ -427,13 +540,20 @@ Your answer must be:
                         source = result.get("source_name", "Unknown Source")
                         source_type = result.get("source_type", "Unknown Type")
                         chunk_id = result.get("chunk_id", f"chunk-{i}")
-                        formatted_result = f"[Source: {source} | Type: {source_type}]\n{content}\n"
+                        source_uri = result.get("source_uri", "")
+                        
+                        # Format citation with source URI if available
+                        if source_uri:
+                            formatted_result = f"[Source: {source} | Type: {source_type} | URL: {source_uri}]\n{content}\n"
+                        else:
+                            formatted_result = f"[Source: {source} | Type: {source_type}]\n{content}\n"
+                        
                         formatted_results.append(formatted_result)
                     
                     context = "\n\n---\n\n".join(formatted_results)
                     logger.info(f"Retrieved {len(search_results)} search results with filter: {source_types if source_types else 'None'}")
                 else:
-                    logger.info(f"No search results found with filter: {source_types if source_types else 'None'}")
+                    logger.info(f"No search results found with filter: {source_types if source_types else 'None'} after trying fallbacks")
             except Exception as e:
                 logger.error(f"Error retrieving search results: {str(e)}")
         

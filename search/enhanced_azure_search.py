@@ -242,26 +242,85 @@ class EnhancedAzureSearchClient:
                 if filter_parts:
                     filter_string = " and ".join(filter_parts)
             
-            # Create search options
-            search_options = {
-                "top": top,
+            # Implement hybrid search using a compatible approach
+            logger.info("Implementing hybrid search using compatible approach")
+            
+            # First, perform keyword search to get initial results
+            logger.info(f"Step 1: Performing keyword search with query: {query}")
+            keyword_search_options = {
+                "top": top * 2,  # Get more results for re-ranking
                 "filter": filter_string,
                 "include_total_count": True
             }
             
-            # Perform hybrid search (text + semantic)
-            if query:
-                # If we have a text query, use it
-                results = self.search_client.search(
-                    search_text=query,
-                    **search_options
-                )
+            # Perform keyword search
+            keyword_results = self.search_client.search(
+                search_text=query if query else "*",
+                **keyword_search_options
+            )
+            
+            # Convert results to list for processing
+            keyword_result_list = list(keyword_results)
+            logger.info(f"Found {len(keyword_result_list)} results from keyword search")
+            
+            # If we have embedding, perform manual re-ranking based on vector similarity
+            if embedding and len(keyword_result_list) > 0:
+                try:
+                    logger.info("Step 2: Performing manual vector similarity re-ranking")
+                    
+                    # Check if the index has vector fields
+                    has_vector_field = False
+                    for result in keyword_result_list:
+                        if self.vector_field_name in result:
+                            has_vector_field = True
+                            break
+                    
+                    # If vector field exists, perform re-ranking
+                    if has_vector_field:
+                        import numpy as np
+                        from sklearn.metrics.pairwise import cosine_similarity
+                        
+                        # Convert query embedding to numpy array
+                        query_embedding = np.array(embedding).reshape(1, -1)
+                        
+                        # Calculate similarity scores for each result
+                        reranked_results = []
+                        for result in keyword_result_list:
+                            # Get document embedding if available
+                            doc_embedding = result.get(self.vector_field_name)
+                            if doc_embedding:
+                                # Calculate cosine similarity
+                                doc_embedding_array = np.array(doc_embedding).reshape(1, -1)
+                                similarity = float(cosine_similarity(query_embedding, doc_embedding_array)[0][0])
+                                
+                                # Create result with combined score
+                                # Combine keyword score and vector similarity
+                                keyword_score = result.get("@search.score", 0)
+                                combined_score = (keyword_score + similarity) / 2
+                                
+                                # Add to results with combined score
+                                result_copy = dict(result)
+                                result_copy["@search.score"] = combined_score
+                                reranked_results.append(result_copy)
+                            else:
+                                # If no embedding, keep original score
+                                reranked_results.append(dict(result))
+                        
+                        # Sort by combined score
+                        reranked_results.sort(key=lambda x: x.get("@search.score", 0), reverse=True)
+                        
+                        # Limit to top results
+                        results = reranked_results[:top]
+                        logger.info(f"Re-ranked results using vector similarity")
+                    else:
+                        logger.info(f"Vector field '{self.vector_field_name}' not found in results, using keyword results")
+                        results = keyword_result_list[:top]
+                except Exception as e:
+                    logger.warning(f"Error during vector re-ranking: {str(e)}")
+                    results = keyword_result_list[:top]
             else:
-                # If no text query, use an empty string
-                results = self.search_client.search(
-                    search_text="*",
-                    **search_options
-                )
+                # If no embedding or no results, use keyword results
+                results = keyword_result_list[:top]
             
             # Process results
             search_results = []
@@ -282,7 +341,7 @@ class EnhancedAzureSearchClient:
             logger.info(f"Found {len(search_results)} results for hybrid query")
             return search_results
         except Exception as e:
-            logger.error(f"Error performing vector search: {str(e)}")
+            logger.error(f"Error performing hybrid search: {str(e)}")
             return []
     
     def index_chunks(self, chunks: List[Dict[str, Any]]) -> bool:
@@ -300,16 +359,47 @@ class EnhancedAzureSearchClient:
             return False
         
         try:
+            # Import modules needed for date handling
+            from datetime import datetime
+            import re
+            
             # Process chunks to ensure they have the required fields
             documents = []
-            for chunk in chunks:
+            logger.info(f"Processing {len(chunks)} chunks for indexing")
+            
+            for i, chunk in enumerate(chunks):
+                # Log every 100 chunks to avoid excessive logging
+                if i % 100 == 0:
+                    logger.info(f"Processing chunk {i}/{len(chunks)}")
+                
+                # Detailed logging for the first few chunks to understand structure
+                if i < 5:
+                    logger.info(f"Chunk {i} keys: {chunk.keys()}")
+                    if 'metadata' in chunk:
+                        logger.info(f"Chunk {i} metadata keys: {chunk['metadata'].keys()}")
+                    if 'content' in chunk:
+                        content_preview = chunk['content'][:100] + '...' if len(chunk['content']) > 100 else chunk['content']
+                        logger.info(f"Chunk {i} content preview: {content_preview}")
+                    if 'embedding' in chunk:
+                        logger.info(f"Chunk {i} has embedding of length: {len(chunk['embedding'])}")
+                
                 # Ensure chunk has an ID field
                 if self.id_field_name not in chunk:
                     if 'chunk_id' in chunk:
                         chunk[self.id_field_name] = chunk['chunk_id']
+                        logger.debug(f"Using chunk_id as id for chunk {i}")
                     else:
-                        logger.warning(f"Chunk missing ID field, skipping: {chunk}")
+                        logger.warning(f"Chunk {i} missing ID field, skipping")
                         continue
+                
+                # Validate required fields
+                if not chunk.get('content'):
+                    logger.warning(f"Chunk {i} missing content, skipping")
+                    continue
+                    
+                if not chunk.get('embedding') or len(chunk.get('embedding', [])) == 0:
+                    logger.warning(f"Chunk {i} missing embedding, skipping")
+                    continue
                 
                 # Sanitize the document ID to ensure it only contains allowed characters
                 # Azure AI Search only allows letters, digits, underscore, dash, and equal sign
@@ -317,41 +407,103 @@ class EnhancedAzureSearchClient:
                 # Replace any disallowed characters with underscores
                 sanitized_id = ''.join(c if c.isalnum() or c in '_-=' else '_' for c in chunk_id)
                 
+                # Get metadata
+                metadata = chunk.get('metadata', {})
+                
                 # Create a new document for the index with only fields that exist in the schema
                 doc = {
                     # Required fields
                     'id': sanitized_id,
-                    'original_content': chunk.get('content', ''),
-                    'content_vector': chunk.get('embedding', []),
+                    'original_content': chunk.get('content', ''),  # Map to 'original_content' field in schema
+                    'content_vector': chunk.get('embedding', []),  # Map to 'content_vector' field in schema
                 }
                 
-                # Add metadata fields if available
-                if 'metadata' in chunk:
-                    metadata = chunk['metadata']
-                    
-                    # Map metadata fields to index fields
-                    # Only include fields that are defined in the index schema
-                    if 'id' in metadata:
-                        doc['parent_id'] = str(metadata['id'])
-                    
-                    if 'entity_type' in metadata:
-                        doc['source_type'] = str(metadata['entity_type'])
-                    
-                    if 'title' in metadata:
-                        doc['title'] = str(metadata['title'])
-                    
-                    if 'content_to_embed' in metadata:
-                        doc['content_to_embed'] = str(metadata['content_to_embed'])
-                    
-                    if 'source_name' in metadata:
-                        doc['source_name'] = str(metadata['source_name'])
-                    
-                    if 'created_at' in metadata:
-                        doc['created_at'] = str(metadata['created_at'])
-                    
-                    if 'author_name' in metadata:
-                        doc['author_name'] = str(metadata['author_name'])
+                # Log document creation for debugging
+                if i < 5:
+                    logger.info(f"Created document with id: {sanitized_id}")
+                    logger.info(f"Document has content: {'Yes' if chunk.get('content') else 'No'}")
+                    logger.info(f"Document has embedding: {'Yes' if chunk.get('embedding') else 'No'}")
+                    logger.info(f"Document embedding length: {len(chunk.get('embedding', []))}")
                 
+                # Map metadata fields to index fields based on the schema
+                # Core fields from schema
+                if 'source_type' in metadata:
+                    doc['source_type'] = str(metadata['source_type'])
+                elif 'entity_type' in metadata:
+                    doc['source_type'] = str(metadata['entity_type'])
+                
+                # Handle date fields - ensure they're valid for Edm.DateTimeOffset
+                # Format: YYYY-MM-DDThh:mm:ssZ
+                if 'created_at' in metadata and metadata['created_at']:
+                    try:
+                        # If it's already a datetime object
+                        if isinstance(metadata['created_at'], datetime):
+                            doc['created_at'] = metadata['created_at'].strftime('%Y-%m-%dT%H:%M:%SZ')
+                        else:
+                            # If it's a string, try to parse it
+                            date_str = str(metadata['created_at'])
+                            # Remove any microseconds and timezone info
+                            date_str = re.sub(r'\.[0-9]+', '', date_str)
+                            date_str = re.sub(r'[+-][0-9]{2}:[0-9]{2}$', '', date_str)
+                            # Add Z suffix if not present
+                            if not date_str.endswith('Z'):
+                                date_str += 'Z'
+                            doc['created_at'] = date_str
+                    except Exception as e:
+                        # If parsing fails, use current date
+                        logger.debug(f"Error parsing date: {e}, using current date")
+                        doc['created_at'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+                else:
+                    # Use current date if missing
+                    doc['created_at'] = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+                
+                # Standard metadata fields from the index schema
+                if 'title' in metadata:
+                    doc['title'] = str(metadata['title'])
+                
+                # Map source_uri to source_uri which exists in the schema
+                if 'source_uri' in metadata:
+                    doc['source_uri'] = str(metadata['source_uri'])
+                elif 'gitlab_url' in metadata:
+                    doc['source_uri'] = str(metadata['gitlab_url'])
+                elif 'web_url' in metadata:
+                    doc['source_uri'] = str(metadata['web_url'])
+                
+                # Map file_path to path which exists in the schema
+                if 'file_path' in metadata:
+                    doc['path'] = str(metadata['file_path'])
+                elif 'path' in metadata:
+                    doc['path'] = str(metadata['path'])
+                
+                # Map author information
+                if 'author_name' in metadata:
+                    doc['author_username_gitlab'] = str(metadata['author_name'])
+                
+                # Map project information
+                if 'project_id' in metadata:
+                    doc['project_id_gitlab'] = str(metadata['project_id'])
+                
+                # Add content summary if available
+                if 'content_summary' in metadata and metadata['content_summary']:
+                    doc['summary'] = str(metadata['content_summary'])
+                    
+                # Additional fields from the schema that match directly
+                # Only include fields that are known to exist in the schema
+                for field in ['source_id', 'updated_at']:
+                    if field in metadata and metadata[field] is not None:
+                        doc[field] = metadata[field]
+                        
+                # Map source_type instead of entity_type (which doesn't exist in schema)
+                if 'entity_type' in metadata:
+                    doc['source_type'] = str(metadata['entity_type'])
+                elif 'source_type' in metadata:
+                    doc['source_type'] = str(metadata['source_type'])
+                    
+                # Store chunk_id in parent_id if it exists in the schema
+                if 'chunk_id' in metadata:
+                    doc['parent_id'] = str(metadata['chunk_id'])
+                
+                # Add the document to the list
                 documents.append(doc)
             
             # Upload documents to the index in batches
@@ -368,5 +520,5 @@ class EnhancedAzureSearchClient:
                 logger.warning("No valid documents to index")
                 return False
         except Exception as e:
-            logger.error(f"Error indexing chunks: {str(e)}")
+            logger.error(f"Error indexing chunks: {e}")
             return False
