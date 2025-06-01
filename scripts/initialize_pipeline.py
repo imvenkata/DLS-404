@@ -35,7 +35,7 @@ def extract_data(project_ids: Union[str, List[str]],
                 group_projects_ids: Union[str, List[str]] = None,
                 extract_issues: bool = True, 
                 extract_merge_requests: bool = True, 
-                extract_commits: bool = True, 
+                extract_commits: bool = False, 
                 extract_code: bool = True, 
                 extract_epics: bool = True):
     """
