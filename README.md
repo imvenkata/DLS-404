@@ -4,8 +4,10 @@ This repository contains a modular implementation of a Retrieval-Augmented Gener
 
 ## Latest Updates
 
-- **Semantic Kernel 1.32.0 Compatibility**: The agentic RAG system has been fully updated to work with Semantic Kernel 1.32.0, including new function invocation patterns and robust JSON parsing.
-- **Enhanced Issue Creation Workflow**: The issue creation process now requires detailed project and epic information before creating issues, ensuring proper context and linking.
+- **Semantic Kernel 1.32.0 Compatibility**: The codebase has been updated to work with Semantic Kernel 1.32.0, addressing breaking changes from previous versions.
+- **Enhanced Issue Creation Workflow**: Added a multi-step workflow for creating GitLab issues with draft review and confirmation steps.
+- **Enhanced Query Intent Recognition**: Improved intent recognition to detect both user intent (technical question, issue creation, etc.) and content type (code, issue, merge request, epic).
+- **Content Type-Based Search Filtering**: Added intelligent filtering of search results based on detected content type to improve response relevance.
 
 ## Table of Contents
 
@@ -405,6 +407,26 @@ The issue creation workflow has been improved to:
 - Provide clear, specific error messages when required information is missing
 - Include source citations in knowledge discovery responses
 
+### Enhanced Query Intent Recognition and Search Filtering
+
+The system now features improved query understanding and more relevant search results:
+
+#### Content Type Detection
+- Detects both user intent (technical question, issue creation, etc.) and content type (code, issue, merge request, epic)
+- Uses an enhanced prompt that outputs a structured JSON with intent, content type, confidence, and explanation
+- Supports multiple content types: CODE, ISSUE, MERGE_REQUEST, EPIC, and GENERAL
+
+#### Intelligent Search Filtering
+- Filters Azure Search results based on the detected content type
+- Maps content types to corresponding `source_type` field values in the search index
+- Supports multi-type filtering for general queries (e.g., searching across both code and issues)
+- Improves search relevance by focusing on the most appropriate document types
+
+#### Enhanced Search Results
+- Includes both source name and source type in search results for better citation clarity
+- Formats results with clear attribution to help users understand the source of information
+- Prioritizes the most relevant document types based on the query context
+
 ### Configuring the Agent
 
 The agent uses the same Azure OpenAI and Azure Search configurations as the standard RAG system. Make sure your `.env` file has the correct settings:
@@ -516,6 +538,11 @@ AgentRAG: Handles retrieval-augmented generation
 GitLabMCPAgent: Provides secure GitLab operations through a Managed Content Provider
 Azure OpenAI integration for embeddings and completions
 Azure Search for vector storage and retrieval
+
+## Demo
+
+python3 /Users/venkata/hackathon/DLS-404/scripts/test_content_type_search.py
+
 
 ## License
 
