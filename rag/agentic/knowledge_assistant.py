@@ -15,8 +15,10 @@ from datetime import datetime
 import semantic_kernel as sk
 from semantic_kernel.functions.kernel_arguments import KernelArguments
 from semantic_kernel.connectors.ai.open_ai.services.azure_chat_completion import AzureChatCompletion
-# Updated imports for newer Semantic Kernel versions
-# Note: Sequential planner might be in a different location or have a different API
+# Updated imports for Semantic Kernel 1.32.0
+from semantic_kernel.core_plugins import TextPlugin
+from semantic_kernel.prompt_template.prompt_template_config import PromptTemplateConfig
+from semantic_kernel.prompt_template.kernel_prompt_template import KernelPromptTemplate
 
 from config.config import (
     AZURE_OPENAI_ENDPOINT,
@@ -149,7 +151,8 @@ Analyze the query and determine the most appropriate intent category from the fo
 2. ISSUE_CREATION - User wants to create a GitLab issue or user story
 3. STATUS_REPORT - User wants a status report on a GitLab epic or project
 4. AUTHENTICATION - User needs to set up or manage GitLab authentication
-5. GENERAL_QUERY - User has a general question not related to the above categories
+5. CODE_GENERATION - User wants to generate code snippets, functions, classes, or templates based on company codebase
+6. GENERAL_QUERY - User has a general question not related to the above categories
 
 Additionally, determine the content type the query is most likely related to:
 1. CODE - Query is about code, implementation, functions, classes, or programming concepts
@@ -385,6 +388,8 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
             return await self._process_status_report(query, {}, content_type)
         elif intent == "AUTHENTICATION":
             return await self._process_authentication(query, {})
+        elif intent == "CODE_GENERATION":
+            return await self._process_code_generation(query, content_type)
         else:  # GENERAL_QUERY
             return await self._process_general_query(query)
     
@@ -874,102 +879,203 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
         # In Semantic Kernel 1.32.0, the result is directly the value
         return str(status_result)
     
-    async def _process_authentication(self, query: str, parameters: Dict[str, Any]) -> str:
+    async def _process_authentication(self, query: str, context: Dict[str, Any]) -> str:
         """
         Process an authentication request.
         
         Args:
             query: User query string
-            parameters: Parameters extracted from intent recognition
+            context: Additional context
             
         Returns:
-            Authentication response
+            Response to the authentication request
         """
         logger.info(f"Processing authentication request: {query}")
         
-        # Check if this is a configuration request or a status check
-        if "configure" in query.lower() or "setup" in query.lower() or "set up" in query.lower():
-            # Determine authentication type
-            if "pat" in query.lower() or "token" in query.lower() or "personal access token" in query.lower():
-                # PAT authentication
-                # Extract parameters
-                import re
+        # For now, just provide basic information about authentication
+        return "To authenticate with GitLab, you need to set up a personal access token. Please follow these steps:\n\n" + \
+               "1. Go to your GitLab profile settings\n" + \
+               "2. Navigate to 'Access Tokens'\n" + \
+               "3. Create a new token with 'api' scope\n" + \
+               "4. Set the token in your .env file as GITLAB_TOKEN\n\n" + \
+               "If you've already done this and are experiencing issues, please check that your token hasn't expired and has the correct permissions."
+
+    async def _process_code_generation(self, query: str, content_type: str) -> str:
+        """
+        Process a code generation request.
+        
+        Args:
+            query: User query string
+            content_type: Detected content type
+            
+        Returns:
+            Generated code snippet or template based on company codebase
+        """
+        logger.info(f"Processing code generation request: {query}")
+        
+        # 1. Extract code generation parameters using an LLM prompt
+        code_gen_prompt = """
+You are an AI assistant analyzing a user query for code generation requirements.
+
+User query: {{$input}}
+
+Extract the following information from the query and format as JSON:
+1. code_type: The type of code to generate (function, class, script, template, etc.)
+2. language: The programming language to use (python, javascript, terraform, etc.)
+3. purpose: A clear description of what the code should do
+4. requirements: A list of specific requirements or features the code should implement
+
+Respond with a JSON object containing these fields.
+"""
+        
+        # Create a direct prompt for parameter extraction
+        param_extraction_result = await self.kernel.invoke_prompt(
+            prompt=code_gen_prompt,
+            arguments=KernelArguments(input=query)
+        )
+        
+        # Parse parameters
+        try:
+            # Clean up the result string by removing code fence markers if present
+            params_str = str(param_extraction_result)
+            if "```json" in params_str and "```" in params_str:
+                params_str = params_str.split("```json", 1)[1].split("```", 1)[0].strip()
+            elif "```" in params_str:
+                params_str = params_str.split("```", 1)[1].split("```", 1)[0].strip()
                 
-                # Try to extract GitLab URL
-                gitlab_url = parameters.get("gitlab_url")
-                if not gitlab_url:
-                    url_match = re.search(r'https?://[^\s]+', query)
-                    if url_match:
-                        gitlab_url = url_match.group(0)
-                
-                # Try to extract token
-                token = parameters.get("token")
-                if not token:
-                    token_match = re.search(r'token[:\s]+([^\s]+)', query, re.IGNORECASE)
-                    if token_match:
-                        token = token_match.group(1)
-                
-                if not gitlab_url or not token:
-                    return "To configure GitLab authentication with a Personal Access Token (PAT), I need both the GitLab URL and the token. Please provide this information."
-                
-                # Configure PAT authentication
-                auth_context = KernelArguments(
-                    gitlab_url=gitlab_url,
-                    token=token,
-                    store_securely="true"
-                )
-                
-                auth_result = await self.kernel.invoke(
-                    plugin_name="GitLabAuth",
-                    function_name="configure_pat_auth",
-                    arguments=auth_context
-                )
-                
-                # In Semantic Kernel 1.32.0, the result is directly the value
-                logger.info(f"Auth result type: {type(auth_result)}")
-                logger.info(f"Auth result value: {auth_result}")
-                
-                try:
-                    # Try parsing as JSON
-                    auth_data = json.loads(str(auth_result))
-                except json.JSONDecodeError:
-                    # If not valid JSON, create a default structure
-                    logger.warning(f"Could not parse auth result as JSON: {auth_result}")
-                    auth_data = {"status": "error", "message": f"Authentication failed: {str(auth_result)}"}
-                
-                if auth_data.get("status") == "success":
-                    return f"Successfully configured GitLab authentication with PAT for {gitlab_url}. You are authenticated as {auth_data.get('user')}."
-                else:
-                    return f"Error configuring GitLab authentication: {auth_data.get('message')}"
-            elif "oauth" in query.lower():
-                # OAuth authentication
-                return "OAuth authentication setup requires additional steps. Please use the GitLabAuth.configure_oauth_auth function directly with your client ID, client secret, and redirect URI."
-            else:
-                return "I can help you set up GitLab authentication. Would you like to use a Personal Access Token (PAT) or OAuth? For PAT authentication, please provide your GitLab URL and token."
-        else:
-            # Check authentication status
-            auth_result = await self.kernel.invoke(
-                plugin_name="GitLabAuth",
-                function_name="get_auth_token",
-                arguments=KernelArguments()
+            code_params = json.loads(params_str)
+            logger.info(f"Extracted code generation parameters: {json.dumps(code_params)}")
+        except Exception as e:
+            logger.error(f"Error parsing code generation parameters: {str(e)}")
+            logger.error(f"Raw parameters result: {param_extraction_result}")
+            code_params = {
+                "code_type": "function",
+                "language": "python",
+                "purpose": query,
+                "requirements": []
+            }
+        
+        # 2. Search for relevant code examples in Azure Search
+        code_type = code_params.get("code_type", "function")
+        language = code_params.get("language", "python")
+        purpose = code_params.get("purpose", query)
+        requirements = code_params.get("requirements", [])
+        
+        # Construct search query
+        search_query = f"{purpose} {code_type} {' '.join(requirements) if isinstance(requirements, list) else requirements}"
+        
+        # Filter by source type if applicable
+        source_types = None
+        if content_type == "CODE":
+            source_types = ["code"]
+        
+        # Generate embedding for the query using Azure OpenAI
+        try:
+            from processors.embeddings_generator import EmbeddingsGenerator
+            from config.config import (
+                AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY,
+                AZURE_OPENAI_EMBEDDING_DEPLOYMENT, AZURE_OPENAI_EMBEDDING_MODEL,
+                AZURE_OPENAI_EMBEDDING_DIMENSION
             )
             
-            # In Semantic Kernel 1.32.0, the result is directly the value
-            logger.info(f"Auth status result type: {type(auth_result)}")
-            logger.info(f"Auth status result value: {auth_result}")
+            # Initialize embeddings generator
+            embeddings_generator = EmbeddingsGenerator(
+                endpoint=AZURE_OPENAI_ENDPOINT,
+                api_key=AZURE_OPENAI_KEY,
+                deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                model=AZURE_OPENAI_EMBEDDING_MODEL,
+                dimension=AZURE_OPENAI_EMBEDDING_DIMENSION
+            )
             
-            try:
-                # Try parsing as JSON
-                auth_data = json.loads(str(auth_result))
-            except json.JSONDecodeError:
-                # If not valid JSON, create a default structure
-                logger.warning(f"Could not parse auth status result as JSON: {auth_result}")
-                auth_data = {"status": "error", "message": f"Could not check authentication status: {str(auth_result)}"}
+            logger.info("Generating embedding for code generation query")
+            query_embedding = embeddings_generator.generate_embedding(search_query)
+            logger.info(f"Generated embedding with dimension {len(query_embedding)}")
             
-            if auth_data.get("status") == "success":
-                return f"You are currently authenticated to GitLab at {auth_data.get('gitlab_url')} using {auth_data.get('auth_type')} authentication."
-            else:
-                return f"You are not currently authenticated to GitLab. {auth_data.get('message')}"
+            # Perform hybrid search with embedding and keyword
+            search_results = self.search_client.search(
+                query=search_query,
+                embedding=query_embedding,
+                source_types=source_types,
+                top=5,
+                use_vector_search=True  # Enable vector search for hybrid search
+            )
+            
+            logger.info(f"Performed hybrid search (vector + keyword) for code generation")
+            
+        except Exception as e:
+            logger.error(f"Error in hybrid search: {str(e)}")
+            logger.info("Falling back to keyword-only search")
+            
+            # Fallback to keyword search if embedding generation fails
+            search_results = self.search_client.search(
+                query=search_query,
+                source_types=source_types,
+                top=5,
+                use_vector_search=False
+            )
+        
+        # 3. Generate code based on search results and requirements
+        context_docs = []
+        for result in search_results:
+            content = result.get("content", "")
+            source = result.get("source_url", "")
+            context_docs.append({
+                "content": content,
+                "source": source
+            })
+        
+        # Create a code generation prompt
+        code_gen_template = """
+You are an expert code generator creating high-quality code based on user requirements and existing codebase examples.
+
+USER REQUIREMENTS:
+Code Type: {{$code_type}}
+Language: {{$language}}
+Purpose: {{$purpose}}
+Specific Requirements: {{$requirements}}
+
+RELEVANT CODE EXAMPLES FROM COMPANY CODEBASE:
+{{$context_docs}}
+
+Based on the user requirements and the relevant code examples from the company codebase, generate a complete, well-documented {{$code_type}} in {{$language}}.
+
+Follow these guidelines:
+1. Maintain consistent coding style with the company codebase examples
+2. Include proper error handling and input validation
+3. Add comprehensive documentation and comments
+4. Ensure the code is modular, reusable, and follows best practices
+5. Include all necessary imports and dependencies
+
+GENERATED CODE:
+"""
+        
+        # Prepare context for code generation
+        code_gen_args = KernelArguments(
+            code_type=code_type,
+            language=language,
+            purpose=purpose,
+            requirements=json.dumps(requirements) if isinstance(requirements, list) else requirements,
+            context_docs=json.dumps(context_docs)
+        )
+        
+        # Generate code using direct prompt invocation
+        code_result = await self.kernel.invoke_prompt(
+            prompt=code_gen_template,
+            arguments=code_gen_args
+        )
+        
+        # Format the response with the generated code and sources
+        response = f"Here's the generated {code_type} in {language} based on your requirements:\n\n"
+        response += str(code_result)
+        
+        # Add sources if available
+        if context_docs:
+            response += "\n\nThis code was generated based on the following sources from your company codebase:\n"
+            for i, doc in enumerate(context_docs, 1):
+                source = doc.get("source", "Unknown source")
+                response += f"\n{i}. {source}"
+        
+        return response
     
     async def _process_general_query(self, query: str) -> str:
         """
