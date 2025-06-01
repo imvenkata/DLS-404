@@ -275,9 +275,9 @@ If ANY required information is missing, include the field name in the 'missing_r
         # Register function with kernel
         self.kernel.add_function("IssueCreation", issue_slot_filling)
         
-        # Define semantic function for technical question answering
-        technical_qa_prompt = """
-You are an AI assistant answering technical questions based on retrieved information.
+        # Define semantic function for knowledge discovery with citations
+        knowledge_discovery_prompt = """
+You are an AI assistant providing knowledge discovery with cited answers based on retrieved information.
 
 User question: {{$input}}
 
@@ -309,10 +309,10 @@ Example citation with URL: According to [Project Documentation](https://gitlab.c
 Example citation without URL: The chunking system [Source: Code Architecture Document] divides content into logical segments.
 """
         
-        # Create prompt config for technical QA
-        technical_qa_config = PromptTemplateConfig(
-            template=technical_qa_prompt,
-            description="Answer technical questions based on retrieved information",
+        # Create prompt config for knowledge discovery
+        knowledge_discovery_config = PromptTemplateConfig(
+            template=knowledge_discovery_prompt,
+            description="Answer knowledge discovery queries with cited information",
             input_variables=[
                 InputVariable(name="input", description="The user question", is_required=True),
                 InputVariable(name="context", description="Retrieved information context", is_required=True)
@@ -325,17 +325,17 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
         )
         
         # Create the function and add it to the kernel
-        technical_qa = KernelFunction.from_prompt(
-            prompt=technical_qa_prompt,
-            function_name="answer_technical_question",
-            plugin_name="TechnicalQA",
-            description="Answer technical questions based on retrieved information",
-            prompt_template_config=technical_qa_config,
+        knowledge_discovery = KernelFunction.from_prompt(
+            prompt=knowledge_discovery_prompt,
+            function_name="answer_knowledge_query",
+            plugin_name="KnowledgeDiscovery",
+            description="Answer knowledge discovery queries with cited information",
+            prompt_template_config=knowledge_discovery_config,
             prompt_execution_settings=None
         )
         
         # Register function with kernel
-        self.kernel.add_function("TechnicalQA", technical_qa)
+        self.kernel.add_function("KnowledgeDiscovery", knowledge_discovery)
     
     async def process_query(self, query: str) -> str:
         """
@@ -380,8 +380,8 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
             logger.error(f"Raw intent result: {intent_result}")
         
         # 3. Process based on intent
-        if intent == "TECHNICAL_QUESTION":
-            return await self._process_technical_question(query, content_type)
+        if intent == "KNOWLEDGE_DISCOVERY":
+            return await self._process_knowledge_discovery(query, content_type)
         elif intent == "ISSUE_CREATION":
             return await self._process_issue_creation(query)
         elif intent == "STATUS_REPORT":
@@ -393,18 +393,18 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
         else:  # GENERAL_QUERY
             return await self._process_general_query(query)
     
-    async def _process_technical_question(self, query: str, content_type: str) -> str:
+    async def _process_knowledge_discovery(self, query: str, content_type: str) -> str:
         """
-        Process a technical question.
+        Process a knowledge discovery query with cited answers.
         
         Args:
             query: User query string
             content_type: Detected content type
             
         Returns:
-            Response to the technical question
+            Response to the knowledge discovery query with citations
         """
-        logger.info(f"Processing technical question: {query}")
+        logger.info(f"Processing knowledge discovery query: {query}")
         
         # Check if query is about chunking strategy or documentation
         chunking_keywords = ["chunking", "chunk", "strategy", "documentation", "docs"]
@@ -569,8 +569,8 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
         )
         
         answer_result = await self.kernel.invoke(
-            plugin_name="TechnicalQA",
-            function_name="answer_technical_question",
+            plugin_name="KnowledgeDiscovery",
+            function_name="answer_knowledge_query",
             arguments=qa_context
         )
         
