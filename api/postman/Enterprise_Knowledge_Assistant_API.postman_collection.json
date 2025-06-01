@@ -1,0 +1,603 @@
+{
+  "info": {
+    "name": "Enterprise Knowledge Assistant API",
+    "description": "A collection to test the DLS-404 Enterprise Knowledge Assistant API with various query types",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "API Status",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:8080/",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": [""]
+        },
+        "description": "Check if the API is running"
+      },
+      "response": []
+    },
+    {
+      "name": "API Documentation",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "http://localhost:8080/docs",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["docs"]
+        },
+        "description": "View the API documentation"
+      },
+      "response": []
+    },
+    {
+      "name": "GitLab Queries",
+      "item": [
+        {
+          "name": "Chunking Strategy",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What is the chunking strategy used in this project?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about the chunking strategy used in the project (system will automatically detect GitLab as data source)"
+          },
+          "response": []
+        },
+        {
+          "name": "Document Chunks Mapping",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How are document chunks identified and mapped to source files?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about document chunks identification and mapping (system will automatically detect relevant content types and data sources)"
+          },
+          "response": []
+        },
+        {
+          "name": "Main Components",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What are the main components of the GitLab RAG application?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about the main components of the GitLab RAG application (system will detect GitLab as data source)"
+          },
+          "response": []
+        },
+        {
+          "name": "Azure Search Indexing",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"Explain how the Azure Search indexing works in this project\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about Azure Search indexing in the project (system will detect relevant content types)"
+          },
+          "response": []
+        },
+        {
+          "name": "Embedding Generation",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How does the embedding generation work in this project?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about embedding generation in the project (system will detect relevant content types)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Code Analysis Queries",
+      "item": [
+        {
+          "name": "Agentic RAG Architecture",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"Explain the architecture of the agentic RAG system\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about the architecture of the agentic RAG system (system will detect CODE content type)"
+          },
+          "response": []
+        },
+        {
+          "name": "Available Plugins",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What plugins are available in the agentic RAG system?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about available plugins in the agentic RAG system (system will detect CODE content type)"
+          },
+          "response": []
+        },
+        {
+          "name": "Planner Functionality",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How does the planner work in the agentic RAG system?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about how the planner works in the agentic RAG system (system will detect CODE content type)"
+          },
+          "response": []
+        },
+        {
+          "name": "GitLab vs Confluence Actions",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What is the difference between the GitLab and Confluence actions?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about the differences between GitLab and Confluence actions (system will detect both GitLab and Confluence as data sources)"
+          },
+          "response": []
+        },
+        {
+          "name": "Error Handling in Search",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How does the agent handle errors in the search process?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about error handling in the search process (system will detect CODE content type)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Custom Workflow Queries",
+      "item": [
+        {
+          "name": "Implementing New Plugin",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"Can you help me understand how to implement a new plugin for the agentic RAG system?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about implementing a new plugin for the agentic RAG system"
+          },
+          "response": []
+        },
+        {
+          "name": "Adding New Data Source",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What would be required to add a new data source to the system?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about adding a new data source to the system"
+          },
+          "response": []
+        },
+        {
+          "name": "Customizing Response Generation",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How can I customize the response generation process?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about customizing the response generation process"
+          },
+          "response": []
+        },
+        {
+          "name": "Vector Search Tuning",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What are the best practices for tuning the vector search for better results?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about best practices for tuning vector search"
+          },
+          "response": []
+        },
+        {
+          "name": "Performance Monitoring",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How can I monitor the performance of the agentic RAG system?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query about monitoring the performance of the agentic RAG system"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Issue Creation",
+      "item": [
+        {
+          "name": "Create Issue",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/issue",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["issue"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"project_id\": \"dls-404\",\n    \"epic_id\": \"123\",\n    \"title\": \"Implement data source filtering in API\",\n    \"description\": \"Add support for filtering queries by data source (GitLab, Confluence, SharePoint) in the Enterprise Knowledge Assistant API\",\n    \"labels\": \"enhancement,api\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a new issue in GitLab"
+          },
+          "response": []
+        },
+        {
+          "name": "Create User Story",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/user-story",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["user-story"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"project_id\": \"dls-404\",\n    \"epic_id\": \"123\",\n    \"role\": \"knowledge worker\",\n    \"action\": \"filter search results by data source\",\n    \"benefit\": \"find information from specific systems more quickly\",\n    \"acceptance_criteria\": \"API supports data source filtering parameter, UI shows data source filter options, search results indicate which data source they came from\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Create a new user story in GitLab"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Status Reports",
+      "item": [
+        {
+          "name": "Epic Status Report",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/status",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["status"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"epic_url\": \"https://gitlab.com/groups/dls-404/-/epics/123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Generate a status report for a GitLab epic"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Content Type Detection Tests",
+      "item": [
+        {
+          "name": "Filter by CODE",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"How is content type filtering implemented in the search?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query with CODE content type filter"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by ISSUE",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What are the recent issues related to search functionality?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query with ISSUE content type filter"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by MERGE_REQUEST",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What merge requests have been made for the search functionality?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query with MERGE_REQUEST content type filter"
+          },
+          "response": []
+        },
+        {
+          "name": "Filter by EPIC",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "http://localhost:8080/query",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "8080",
+              "path": ["query"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"query\": \"What epics are related to search functionality?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Query with EPIC content type filter"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    }
+  ]
+}

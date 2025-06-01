@@ -83,6 +83,14 @@ class MergeRequestsExtractor(GitLabExtractor):
                 if 'target_branch' in mr_data:
                     metadata['target_branch'] = mr_data['target_branch']
                 
+                # Add source_url for citation purposes
+                if 'web_url' in mr_data:
+                    metadata['source_url'] = mr_data['web_url']
+                elif 'gitlab_url' not in metadata and 'iid' in mr_data and project_id:
+                    # Construct GitLab URL if not available
+                    metadata['source_url'] = f"https://gitlab.com/dls-404/DLS-404/-/merge_requests/{mr_data['iid']}"
+                    metadata['gitlab_url'] = metadata['source_url']
+                
                 # Add metadata to merge request data
                 mr_data['metadata'] = metadata
                 merge_requests.append(mr_data)

@@ -2,26 +2,36 @@
 Script for initializing the RAG pipeline with GitLab data.
 """
 import os
+import sys
+import json
 import logging
 import argparse
-import json
-from typing import List, Union, Dict, Any
+import subprocess
+from typing import Dict, List, Any, Union, Optional
 from dotenv import load_dotenv
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from extractors.enhanced_issues_extractor import EnhancedIssuesExtractor
 from extractors.merge_requests_extractor import MergeRequestsExtractor
-from extractors.commits_extractor import CommitsExtractor
 from extractors.code_extractor import CodeExtractor
-from extractors.gitlab_extractor import GitLabExtractor
-# Import original chunkers
-from processors.text_chunker import TextChunker
-from processors.code_chunker import CodeChunker
-# Import improved chunkers
+from extractors.commits_extractor import CommitsExtractor
+from processors.embeddings_generator import EmbeddingsGenerator
 from processors.improved_text_chunker import ImprovedTextChunker
 from processors.improved_code_chunker import ImprovedCodeChunker
-from processors.embeddings_generator import EmbeddingsGenerator
 from storage.blob_storage import BlobStorage
 from search.azure_search import AzureSearchClient
-from config.config import GITLAB_PROJECT_ID, GITLAB_GROUP_ID, AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME
+from search.enhanced_azure_search import EnhancedAzureSearchClient
+from config.config import (
+    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY,
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT, AZURE_OPENAI_EMBEDDING_MODEL,
+    AZURE_OPENAI_EMBEDDING_DIMENSION,
+    AZURE_STORAGE_CONNECTION_STRING, AZURE_STORAGE_CONTAINER_NAME,
+    AZURE_STORAGE_PROCESSED_CONTAINER_NAME,
+    AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME,
+    GITLAB_URL, GITLAB_TOKEN, GITLAB_PROJECT_ID, GITLAB_GROUP_ID
+)
 
 # Load environment variables
 load_dotenv()
@@ -35,7 +45,7 @@ def extract_data(project_ids: Union[str, List[str]],
                 group_projects_ids: Union[str, List[str]] = None,
                 extract_issues: bool = True, 
                 extract_merge_requests: bool = True, 
-                extract_commits: bool = False, 
+                extract_commits: bool = False, # Set to False by default to exclude commits
                 extract_code: bool = True, 
                 extract_epics: bool = True):
     """
@@ -216,6 +226,189 @@ def extract_data(project_ids: Union[str, List[str]],
     
     return extracted_data
 
+def standardize_source_uri(metadata: Dict[str, Any], chunk_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Standardize source_uri in metadata across all data types and ensure other metadata fields are populated.
+    
+    Args:
+        metadata: Metadata dictionary
+        chunk_id: Optional chunk ID to extract information from
+        
+    Returns:
+        Updated metadata dictionary with standardized source_uri and other fields
+    """
+    # Set source_type if missing
+    if 'entity_type' in metadata and not metadata.get('source_type'):
+        metadata['source_type'] = metadata['entity_type']
+    
+    # If source_uri already exists and looks valid, keep it
+    if 'source_uri' in metadata and metadata['source_uri'] and 'gitlab.com' in metadata['source_uri']:
+        return metadata
+    
+    # If web_url exists, use it as source_uri
+    if 'web_url' in metadata and metadata['web_url']:
+        metadata['source_uri'] = metadata['web_url']
+        return metadata
+    
+    # If gitlab_url exists, use it as source_uri
+    if 'gitlab_url' in metadata and metadata['gitlab_url']:
+        metadata['source_uri'] = metadata['gitlab_url']
+        return metadata
+    
+    # Try to extract information from chunk_id
+    if chunk_id:
+        # Extract file path from code chunk IDs
+        if 'processed_code' in chunk_id:
+            # Format: processed_code_PROJECT_ID_PATH_chunk_INDEX
+            # Example: processed_code_69861496_api_main_py_chunk_0
+            parts = chunk_id.split('_')
+            if len(parts) >= 4:
+                # Extract project ID
+                project_id = parts[2]
+                metadata['project_id_gitlab'] = project_id
+                
+                # Extract file path
+                file_parts = []
+                for i in range(3, len(parts)):
+                    if parts[i] == 'chunk':
+                        break
+                    file_parts.append(parts[i])
+                
+                if file_parts:
+                    file_path = '/'.join(file_parts).replace('_', '/')
+                    # Fix common file extensions
+                    if file_path.endswith('py'):
+                        file_path = file_path[:-2] + '.py'
+                    elif file_path.endswith('js'):
+                        file_path = file_path[:-2] + '.js'
+                    elif file_path.endswith('md'):
+                        file_path = file_path[:-2] + '.md'
+                    elif file_path.endswith('json'):
+                        file_path = file_path[:-4] + '.json'
+                    
+                    metadata['file_path'] = file_path
+                    metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/main/{file_path}"
+                    metadata['source_type'] = 'code'
+                    
+                    # Set title to file path if missing
+                    if not metadata.get('title'):
+                        metadata['title'] = file_path
+        
+        # Extract issue information
+        elif 'processed_issue' in chunk_id:
+            # Format: processed_issue_PROJECT_ID_ISSUE_ID_chunk_INDEX
+            # Example: processed_issue_69861496_123_chunk_0
+            parts = chunk_id.split('_')
+            if len(parts) >= 5:
+                project_id = parts[2]
+                issue_id = parts[3]
+                metadata['project_id_gitlab'] = project_id
+                metadata['item_id_gitlab'] = issue_id
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/issues/{issue_id}"
+                metadata['source_type'] = 'issue'
+        
+        # Extract merge request information
+        elif 'processed_mr' in chunk_id or 'processed_merge_request' in chunk_id:
+            # Format: processed_mr_PROJECT_ID_MR_ID_chunk_INDEX
+            parts = chunk_id.split('_')
+            if len(parts) >= 5:
+                project_id = parts[2]
+                mr_id = parts[3]
+                metadata['project_id_gitlab'] = project_id
+                metadata['item_id_gitlab'] = mr_id
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/merge_requests/{mr_id}"
+                metadata['source_type'] = 'merge_request'
+        
+        # Extract epic information
+        elif 'processed_epic' in chunk_id:
+            # Format: processed_epic_GROUP_ID_EPIC_ID_chunk_INDEX
+            parts = chunk_id.split('_')
+            if len(parts) >= 5:
+                group_id = parts[2]
+                epic_id = parts[3]
+                metadata['epic_id_gitlab'] = epic_id
+                metadata['source_uri'] = f"https://gitlab.com/groups/dls-404/-/epics/{epic_id}"
+                metadata['source_type'] = 'epic'
+    
+    # If we still don't have a source_uri, try to construct it from metadata
+    if not metadata.get('source_uri'):
+        # Construct source_uri based on entity type and ID if possible
+        entity_type = metadata.get('entity_type') or metadata.get('source_type')
+        project_id = metadata.get('project_id') or metadata.get('project_id_gitlab', '69861496')  # Default to DLS-404 project ID
+        
+        if entity_type == 'issue':
+            item_id = metadata.get('id') or metadata.get('iid') or metadata.get('item_id_gitlab')
+            if item_id:
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/issues/{item_id}"
+                metadata['source_type'] = 'issue'
+        
+        elif entity_type == 'merge_request' or entity_type == 'mr':
+            item_id = metadata.get('id') or metadata.get('iid') or metadata.get('item_id_gitlab')
+            if item_id:
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/merge_requests/{item_id}"
+                metadata['source_type'] = 'merge_request'
+        
+        elif entity_type == 'epic':
+            item_id = metadata.get('id') or metadata.get('iid') or metadata.get('epic_id_gitlab')
+            if item_id:
+                metadata['source_uri'] = f"https://gitlab.com/groups/dls-404/-/epics/{item_id}"
+                metadata['source_type'] = 'epic'
+        
+        elif entity_type == 'commit':
+            commit_id = metadata.get('commit_id') or metadata.get('id')
+            if commit_id:
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/commit/{commit_id}"
+                metadata['source_type'] = 'commit'
+        
+        elif entity_type == 'code' or entity_type == 'file':
+            file_path = metadata.get('file_path') or metadata.get('path') or metadata.get('title')
+            branch = metadata.get('branch') or metadata.get('ref') or metadata.get('git_ref', 'main')
+            if file_path:
+                # Clean up file path if it contains class or function names
+                if file_path.startswith('class ') or file_path.startswith('function '):
+                    # Extract just the filename from the title if possible
+                    if metadata.get('file_name'):
+                        file_path = metadata.get('file_name')
+                    elif chunk_id and 'processed_code' in chunk_id:
+                        # Try to extract from chunk_id
+                        parts = chunk_id.split('_')
+                        if len(parts) >= 4:
+                            file_parts = []
+                            for i in range(3, len(parts)):
+                                if parts[i] == 'chunk':
+                                    break
+                                file_parts.append(parts[i])
+                            
+                            if file_parts:
+                                file_path = '/'.join(file_parts).replace('_', '/')
+                                # Fix common file extensions
+                                if file_path.endswith('py'):
+                                    file_path = file_path[:-2] + '.py'
+                                elif file_path.endswith('js'):
+                                    file_path = file_path[:-2] + '.js'
+                                elif file_path.endswith('md'):
+                                    file_path = file_path[:-2] + '.md'
+                                elif file_path.endswith('json'):
+                                    file_path = file_path[:-4] + '.json'
+                
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/{branch}/{file_path}"
+                metadata['source_type'] = 'code'
+                metadata['file_path'] = file_path
+    
+    # Extract information from content_type_detail if available and still no source_uri
+    content_type_detail = metadata.get('content_type_detail')
+    if not metadata.get('source_uri') and content_type_detail:
+        # Try to extract file path from content_type_detail
+        if 'file:' in content_type_detail.lower():
+            file_match = re.search(r'file:\s*([^\n]+)', content_type_detail, re.IGNORECASE)
+            if file_match:
+                file_path = file_match.group(1).strip()
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/main/{file_path}"
+                metadata['source_type'] = 'code'
+                metadata['file_path'] = file_path
+    
+    return metadata
+
 def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[str, List[str]] = None):
     """
     Process, chunk, embed, and upload data for each source item individually.
@@ -306,6 +499,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                     if 'description' in issue and issue['description']:
                         metadata = issue['metadata'].copy()
                         metadata['content_type'] = 'description'
+                        metadata = standardize_source_uri(metadata)
                         current_item_chunks.extend(text_chunker.chunk_text(issue['description'], metadata))
                     
                     if 'notes' in issue and issue['notes']:
@@ -314,6 +508,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                                 metadata = issue['metadata'].copy() # Start from base issue metadata
                                 metadata['content_type'] = 'comment'
                                 metadata['comment_id'] = note.get('id', 'unknown_comment')
+                                metadata = standardize_source_uri(metadata)
                                 if 'author' in note and isinstance(note['author'], dict):
                                     metadata['author_username'] = note['author'].get('username', 'unknown')
                                 current_item_chunks.extend(text_chunker.chunk_text(note['body'], metadata))
@@ -338,6 +533,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                     if 'description' in mr and mr['description']:
                         metadata = mr['metadata'].copy()
                         metadata['content_type'] = 'description'
+                        metadata = standardize_source_uri(metadata)
                         current_item_chunks.extend(text_chunker.chunk_text(mr['description'], metadata))
                     if 'notes' in mr and mr['notes']:
                         for note in mr['notes']:
@@ -345,6 +541,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                                 metadata = mr['metadata'].copy()
                                 metadata['content_type'] = 'comment'
                                 metadata['comment_id'] = note.get('id', 'unknown_comment')
+                                metadata = standardize_source_uri(metadata)
                                 if 'author' in note and isinstance(note['author'], dict):
                                     metadata['author_username'] = note['author'].get('username', 'unknown')
                                 current_item_chunks.extend(text_chunker.chunk_text(note['body'], metadata))
@@ -369,6 +566,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                     if 'message' in commit and commit['message']:
                         metadata = commit['metadata'].copy()
                         metadata['content_type'] = 'message'
+                        metadata = standardize_source_uri(metadata)
                         current_item_chunks.extend(text_chunker.chunk_text(commit['message'], metadata))
                     if 'diff' in commit and commit['diff']:
                         diff_text = ""
@@ -378,6 +576,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                         if diff_text:
                             metadata = commit['metadata'].copy() # Base commit metadata
                             metadata['content_type'] = 'diff'
+                            metadata = standardize_source_uri(metadata)
                             current_item_chunks.extend(text_chunker.chunk_text(diff_text, metadata))
                     
                     if current_item_chunks:
@@ -474,25 +673,37 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
             
     return all_successfully_embedded_chunks_master
 
-def index_chunks(project_ids: Union[str, List[str]] = None):
+def index_chunks(project_ids=None, overwrite=False):
     """
     Index chunks in Azure AI Search.
     
     Args:
-        project_ids: GitLab project IDs (string or list) - used only for logging
+        project_ids: GitLab project IDs (string or list)
+        overwrite: Whether to overwrite existing data in the index
         
     Returns:
-        True if successful, False otherwise
+        bool: True if indexing was successful, False otherwise
     """
-    # Initialize storage
-    blob_storage = BlobStorage()
+    logger.info("Indexing chunks in Azure AI Search")
     
-    # Initialize search client
-    search_client = AzureSearchClient(
+    # Initialize storage and search clients
+    blob_storage = BlobStorage()
+    search_client = EnhancedAzureSearchClient(
         endpoint=AZURE_SEARCH_ENDPOINT,
         api_key=AZURE_SEARCH_KEY,
         index_name=AZURE_SEARCH_INDEX_NAME
     )
+    
+    # If overwrite is True, delete existing documents first
+    if overwrite:
+        logger.info("Overwrite flag is set, deleting existing documents from the index")
+        try:
+            # Use a wildcard query to match all documents
+            search_client.delete_documents("*")
+            logger.info("Successfully deleted existing documents from the index")
+        except Exception as e:
+            logger.error(f"Error deleting documents: {str(e)}")
+            # Continue with indexing even if deletion fails
     
     # Convert string IDs to lists if needed
     if isinstance(project_ids, str):
@@ -515,7 +726,51 @@ def index_chunks(project_ids: Union[str, List[str]] = None):
         chunks = blob_storage.download_processed_data(blob_name)
         if chunks:
             logger.info(f"Loaded {len(chunks)} chunks from {blob_name}")
-            all_chunks.extend(chunks)
+            
+            # Validate and fix chunks before adding them
+            valid_chunks = []
+            for chunk in chunks:
+                # Skip chunks without content or embeddings
+                if not chunk.get('content') or not chunk.get('embedding'):
+                    logger.warning(f"Skipping chunk with missing content or embedding: {chunk.get('id', 'unknown')}")
+                    continue
+                
+                # Ensure metadata exists
+                if not chunk.get('metadata'):
+                    chunk['metadata'] = {}
+                
+                # Standardize source_uri in chunk metadata and pass chunk ID for extraction
+                chunk['metadata'] = standardize_source_uri(chunk['metadata'], chunk.get('id'))
+                
+                # Log source_uri for debugging
+                if chunk['metadata'].get('source_uri'):
+                    logger.info(f"Chunk {chunk.get('id', 'unknown')} has source_uri: {chunk['metadata']['source_uri']}")
+                else:
+                    logger.warning(f"Chunk {chunk.get('id', 'unknown')} is missing source_uri after standardization")
+                
+                # Set source_type if missing
+                if not chunk.get('source_type') and chunk['metadata'].get('source_type'):
+                    chunk['source_type'] = chunk['metadata']['source_type']
+                elif not chunk.get('source_type'):
+                    # Try to determine source type from blob name
+                    if 'code' in blob_name:
+                        chunk['source_type'] = 'code'
+                        chunk['metadata']['source_type'] = 'code'
+                    elif 'issue' in blob_name:
+                        chunk['source_type'] = 'issue'
+                        chunk['metadata']['source_type'] = 'issue'
+                    elif 'mr' in blob_name or 'merge_request' in blob_name:
+                        chunk['source_type'] = 'merge_request'
+                        chunk['metadata']['source_type'] = 'merge_request'
+                    elif 'epic' in blob_name:
+                        chunk['source_type'] = 'epic'
+                        chunk['metadata']['source_type'] = 'epic'
+                
+                # Add the validated chunk
+                valid_chunks.append(chunk)
+            
+            logger.info(f"Found {len(valid_chunks)} valid chunks with content and embeddings in {blob_name}")
+            all_chunks.extend(valid_chunks)
         else:
             logger.warning(f"No chunks found in {blob_name}")
     
@@ -567,17 +822,36 @@ def ensure_json_serializable(data: Any) -> Any:
         return data
 
 def main():
-    """Main function."""
-    parser = argparse.ArgumentParser(description='Initialize RAG pipeline with GitLab data')
-    parser.add_argument('--project-id', default=GITLAB_PROJECT_ID, help='GitLab project ID or comma-separated list of project IDs')
-    parser.add_argument('--group-id', default=GITLAB_GROUP_ID, help='GitLab group ID or comma-separated list of group IDs for epics')
-    parser.add_argument('--group-projects-id', help='GitLab group ID or comma-separated list of group IDs to extract all projects from')
-    parser.add_argument('--extract', action='store_true', help='Extract data from GitLab')
-    parser.add_argument('--process', action='store_true', help='Process and chunk data')
-    parser.add_argument('--embed', action='store_true', help='Generate embeddings for chunks')
-    parser.add_argument('--index', action='store_true', help='Index chunks in Azure AI Search')
-    parser.add_argument('--all', action='store_true', help='Run all steps')
+    """
+    Main function.
+    """
+    # Override Azure endpoints with correct values
+    global AZURE_SEARCH_ENDPOINT, AZURE_OPENAI_ENDPOINT
     
+    # Update Azure Search endpoint if needed
+    if "hackathon-team404-search" in AZURE_SEARCH_ENDPOINT:
+        logger.info(f"Updating Azure Search endpoint from {AZURE_SEARCH_ENDPOINT}")
+        AZURE_SEARCH_ENDPOINT = "https://team404-search.search.windows.net"
+        logger.info(f"Updated Azure Search endpoint to {AZURE_SEARCH_ENDPOINT}")
+    
+    # Update Azure OpenAI endpoint if needed
+    correct_openai_endpoint = "https://hackathon-team404.cognitiveservices.azure.com/"
+    if AZURE_OPENAI_ENDPOINT != correct_openai_endpoint:
+        logger.info(f"Updating Azure OpenAI endpoint from {AZURE_OPENAI_ENDPOINT}")
+        AZURE_OPENAI_ENDPOINT = correct_openai_endpoint
+        logger.info(f"Updated Azure OpenAI endpoint to {AZURE_OPENAI_ENDPOINT}")
+    
+    parser = argparse.ArgumentParser(description="Initialize RAG pipeline with GitLab data")
+    parser.add_argument("--project-id", help="GitLab project ID or comma-separated list of project IDs")
+    parser.add_argument("--group-id", help="GitLab group ID or comma-separated list of group IDs for epics")
+    parser.add_argument("--group-projects-id", help="GitLab group ID or comma-separated list of group IDs to extract all projects from")
+    parser.add_argument("--extract", action="store_true", help="Extract data from GitLab")
+    parser.add_argument("--process", action="store_true", help="Process and chunk data")
+    parser.add_argument("--embed", action="store_true", help="Generate embeddings for chunks")
+    parser.add_argument("--index", action="store_true", help="Index chunks in Azure AI Search")
+    parser.add_argument("--standardize", action="store_true", help="Standardize source URLs in processed data and search index")
+    parser.add_argument("--all", action="store_true", help="Run all steps")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing data")
     args = parser.parse_args()
     
     # Run all steps if --all is specified
@@ -586,26 +860,75 @@ def main():
         args.process = True
         args.embed = True
         args.index = True
+        args.standardize = True
+    
+    # Set default project ID if not specified
+    if not args.project_id:
+        args.project_id = GITLAB_PROJECT_ID
+    
+    # Set default group ID if not specified
+    if not args.group_id:
+        args.group_id = GITLAB_GROUP_ID
+    
+    logger.info("Starting pipeline with the following steps:")
+    if args.extract:
+        logger.info("- Extract data from GitLab")
+    if args.process:
+        logger.info("- Process and chunk data")
+    if args.embed:
+        logger.info("- Generate embeddings for chunks")
+    if args.index:
+        logger.info("- Index chunks in Azure AI Search")
+    if args.standardize:
+        logger.info("- Standardize source URLs")
+    if args.overwrite:
+        logger.info("- Overwriting existing data")
     
     # Extract data
     if args.extract:
-        logger.info(f"Extracting data from GitLab projects: {args.project_id}")
-        extract_data(args.project_id, args.group_id, args.group_projects_id)
+        extract_data(args.project_id, args.group_id, args.group_projects_id, 
+                    extract_commits=False)  # Explicitly exclude commits as per user preference
     
-    # Process and chunk data
-    if args.process:
-        logger.info(f"Processing and chunking data for projects: {args.project_id}")
-        process_chunks(args.project_id)
-    
-    # Generate embeddings
-    if args.embed:
-        logger.info(f"Generating embeddings for projects: {args.project_id}")
-        generate_embeddings(args.project_id)
+    # Process and chunk data, and generate embeddings
+    if args.process or args.embed:
+        logger.info(f"Processing, chunking, and embedding data for projects: {args.project_id}")
+        chunk_and_embed_data(args.project_id, args.group_id)
     
     # Index chunks
     if args.index:
         logger.info(f"Indexing chunks for projects: {args.project_id}")
-        index_chunks(args.project_id)
+        index_chunks(args.project_id, overwrite=args.overwrite)
+    
+    # Standardize source URLs
+    if args.standardize:
+        logger.info("Standardizing source URLs in processed data and search index")
+        # Run the standardize_source_urls.py script as a subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        standardize_script_path = os.path.join(script_dir, 'standardize_source_urls.py')
+        
+        try:
+            # Set PYTHONPATH to include the project root
+            env = os.environ.copy()
+            env['PYTHONPATH'] = os.path.dirname(script_dir)
+            
+            # Run the standardization script
+            result = subprocess.run(
+                [sys.executable, standardize_script_path],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            
+            # Log the output
+            for line in result.stdout.splitlines():
+                logger.info(f"Standardization: {line}")
+                
+            logger.info("Source URL standardization complete")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error standardizing source URLs: {e}")
+            logger.error(f"Stderr: {e.stderr}")
+            logger.error(f"Stdout: {e.stdout}")
     
     logger.info("Pipeline initialization complete")
 

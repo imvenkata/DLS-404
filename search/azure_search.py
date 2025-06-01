@@ -331,7 +331,10 @@ class AzureSearchClient:
                     if 'project_id' in metadata:
                         doc['project_id_gitlab'] = str(metadata['project_id'])
                     
-                    if 'source_url' in metadata:
+                    # Handle source URI - prioritize source_uri over source_url
+                    if 'source_uri' in metadata:
+                        doc['source_uri'] = str(metadata['source_uri'])
+                    elif 'source_url' in metadata:
                         doc['source_uri'] = str(metadata['source_url'])
                     
                     if 'content_summary' in metadata and metadata['content_summary']:

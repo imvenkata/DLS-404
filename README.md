@@ -272,19 +272,16 @@ python tools/configure_extractors.py --disable-code
 
 The configuration is stored in `config/extractor_config.json` and is respected by the extraction pipeline.
 
-### Optimized Pipeline (Without Commits)
+### Optimized Pipeline Configuration
 
-For better performance, you can use the optimized pipeline that excludes commits by default:
+For better performance, it's recommended to exclude commits from the extraction process:
 
 ```bash
-# Run the complete optimized pipeline without commits
-python tools/run_optimized_pipeline.py --all --project-id "your_project_id"
+# Run the complete pipeline without commits
+python scripts/initialize_pipeline.py --all --no-commits
 
-# Run specific steps of the optimized pipeline
-python tools/run_optimized_pipeline.py --extract --process --project-id "your_project_id"
-
-# Include commits if needed (not recommended for initial setup)
-python tools/run_optimized_pipeline.py --all --project-id "your_project_id" --enable-commits
+# Run specific steps of the pipeline
+python scripts/initialize_pipeline.py --extract --process --no-commits
 ```
 
 Excluding commits significantly improves performance and reduces noise in search results, as commit data tends to be verbose and less semantically meaningful than issues, merge requests, and code files.
@@ -338,28 +335,38 @@ python scripts/create_azure_search_index.py
 
 ### Running the Complete Pipeline
 
-To run the complete pipeline (extract, process, embed, and index) in one go:
+To run the complete pipeline (extract, process, embed, and index) in one go, use the `initialize_pipeline.py` script:
 
 ```bash
-# For a specific project
-python main.py --all --project-id your_project_id
+# For all steps (extraction, processing, embedding, and indexing)
+python scripts/initialize_pipeline.py --all
 
-# For multiple projects
-python main.py --all --project-id "project_id_1,project_id_2"
+# For specific projects
+python scripts/initialize_pipeline.py --all --project-id "project_id_1,project_id_2"
 
 # For all projects in a group
-python main.py --all --group-projects-id "group_id_1,group_id_2"
+python scripts/initialize_pipeline.py --all --group-projects-id "group_id_1,group_id_2"
 
 # For epics in a group
-python main.py --all --group-id "group_id_1,group_id_2"
+python scripts/initialize_pipeline.py --all --group-id "group_id_1,group_id_2"
+
+# To skip commit extraction (recommended for better performance)
+python scripts/initialize_pipeline.py --all --no-commits
 ```
+
+The script will:
+1. Extract data from GitLab (issues, merge requests, epics, and code files)
+2. Process and chunk the extracted data
+3. Generate embeddings for the chunks using Azure OpenAI
+4. Index the chunks in Azure Cognitive Search
+5. Standardize source URLs in both processed data blobs and search index documents
 
 ### Running Only Data Extraction and Ingestion (No RAG)
 
 If you only need to extract and ingest data without setting up the RAG components:
 
 ```bash
-python main.py --extract --process --index --project-id your_project_id
+python scripts/initialize_pipeline.py --extract --process --index --project-id your_project_id
 ```
 
 ### API Server
@@ -489,22 +496,17 @@ The application can be deployed as Azure Functions for more scalable and event-d
 
 For a demonstration setup, follow these steps:
 
-1. Extract data from sample projects:
+1. Initialize the complete pipeline (extract, process, embed, and index):
    ```bash
-   python tools/run_optimized_pipeline.py --extract --project-id "69940200,69861496"
+   python scripts/initialize_pipeline.py --all --project-id "69940200,69861496" --no-commits
    ```
 
-2. Process and index the data:
-   ```bash
-   python tools/run_optimized_pipeline.py --process --index
-   ```
-
-3. Start the agentic RAG service:
+2. Start the agentic RAG service:
    ```bash
    python tools/run_rag_service.py
    ```
 
-4. Open http://localhost:8001 in your browser to interact with the system.
+3. Open http://localhost:8001 in your browser to interact with the system.
 
 ## Troubleshooting
 
@@ -525,23 +527,28 @@ export PYTHONVERBOSE=1
 ```
 
 
-## ßProject Overview
+## Project Overview
 The DLS-404 GitLab RAG application is a sophisticated system that combines:
 
-Retrieval-Augmented Generation (RAG) for GitLab data
-Agentic workflows powered by Semantic Kernel
-Knowledge Assistant for interactive querying and issue management
+- Retrieval-Augmented Generation (RAG) for GitLab data
+- Agentic workflows powered by Semantic Kernel
+- Knowledge Assistant for interactive querying and issue management
+
 The system has several key components:
 
-KnowledgeAssistant: Core class that manages agentic workflows
-AgentRAG: Handles retrieval-augmented generation
-GitLabMCPAgent: Provides secure GitLab operations through a Managed Content Provider
-Azure OpenAI integration for embeddings and completions
-Azure Search for vector storage and retrieval
+- KnowledgeAssistant: Core class that manages agentic workflows
+- AgentRAG: Handles retrieval-augmented generation
+- GitLabMCPAgent: Provides secure GitLab operations through a Managed Content Provider
+- Azure OpenAI integration for embeddings and completions
+- Azure Search for vector storage and retrieval
 
 ## Demo
 
-python3 /Users/venkata/hackathon/DLS-404/scripts/test_content_type_search.py
+To test the content type search functionality:
+
+```bash
+python scripts/test_content_type_search.py
+```
 
 
 ## License
