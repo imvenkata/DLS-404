@@ -1,0 +1,37 @@
+.modern-bubble-user {
+  background: #2563eb;
+  color: #fff;
+  border-radius: 16px 16px 6px 16px;
+  padding: 11px 20px;
+  margin-left: auto;
+  max-width: 70%;
+  font-size: 1.09rem;
+  margin-bottom: 5px;
+  box-shadow: 0 1px 6px rgba(37,99,235,0.11);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.modern-bubble-bot {
+  background: #f3f6fb;
+  color: #222c3a;
+  border-radius: 16px 16px 16px 6px;
+  padding: 11px 20px;
+  margin-right: auto;
+  max-width: 70%;
+  font-size: 1.09rem;
+  margin-bottom: 5px;
+  box-shadow: 0 1px 6px rgba(80,112,251,0.08);
+  border: 1px solid #e3e6ea;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Responsive message bubbles */
+@media (max-width: 767px) {
+  .modern-bubble-user,
+  .modern-bubble-bot {
+    padding: 8px 12px;
+    font-size: 1em;
+    max-width: 92vw;
+  }
+}
