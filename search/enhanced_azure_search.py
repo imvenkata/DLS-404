@@ -362,10 +362,17 @@ class EnhancedAzureSearchClient:
             # Import modules needed for date handling
             from datetime import datetime
             import re
+            import traceback
             
             # Process chunks to ensure they have the required fields
             documents = []
             logger.info(f"Processing {len(chunks)} chunks for indexing")
+            
+            # Debug: Log the type of chunks
+            logger.info(f"Type of chunks: {type(chunks)}")
+            if not isinstance(chunks, list):
+                logger.error(f"Expected chunks to be a list, but got {type(chunks)}")
+                return False
             
             for i, chunk in enumerate(chunks):
                 # Log every 100 chunks to avoid excessive logging
@@ -397,13 +404,22 @@ class EnhancedAzureSearchClient:
                     logger.warning(f"Chunk {i} missing content, skipping")
                     continue
                     
-                if not chunk.get('embedding') or len(chunk.get('embedding', [])) == 0:
-                    logger.warning(f"Chunk {i} missing embedding, skipping")
+                # Check for embedding in either 'embedding' or 'content_vector' field
+                embedding_data = None
+                if chunk.get('embedding') and isinstance(chunk.get('embedding'), list) and len(chunk.get('embedding')) > 0:
+                    embedding_data = chunk.get('embedding')
+                elif chunk.get('content_vector') and isinstance(chunk.get('content_vector'), list) and len(chunk.get('content_vector')) > 0:
+                    embedding_data = chunk.get('content_vector')
+                
+                if not embedding_data:
+                    logger.warning(f"Chunk {i} missing valid embedding or content_vector, skipping")
                     continue
                 
                 # Sanitize the document ID to ensure it only contains allowed characters
                 # Azure AI Search only allows letters, digits, underscore, dash, and equal sign
                 chunk_id = chunk.get('id') or f"chunk_{len(documents)}"
+                # Ensure chunk_id is a string
+                chunk_id = str(chunk_id)
                 # Replace any disallowed characters with underscores
                 sanitized_id = ''.join(c if c.isalnum() or c in '_-=' else '_' for c in chunk_id)
                 
@@ -414,16 +430,50 @@ class EnhancedAzureSearchClient:
                 doc = {
                     # Required fields
                     'id': sanitized_id,
-                    'original_content': chunk.get('content', ''),  # Map to 'original_content' field in schema
-                    'content_vector': chunk.get('embedding', []),  # Map to 'content_vector' field in schema
+                    'content': chunk.get('content', ''),  # Map to 'content' field in schema
                 }
+                
+                # Handle embedding - ensure it's a list
+                try:
+                    # Use the embedding_data we detected earlier
+                    embedding = embedding_data
+                    logger.debug(f"Chunk {i} embedding type: {type(embedding)}")
+                    
+                    if embedding is not None:
+                        # Convert to list if it's not already a list
+                        if not isinstance(embedding, list):
+                            try:
+                                # Try to convert to list if it's another iterable
+                                logger.debug(f"Converting embedding of type {type(embedding)} to list for chunk {i}")
+                                embedding = list(embedding)
+                            except Exception as e:
+                                logger.warning(f"Error converting embedding to list: {str(e)}")
+                                # If it's a single value (like an int), wrap it in a list
+                                if isinstance(embedding, (int, float)):
+                                    logger.debug(f"Wrapping numeric embedding {embedding} in a list for chunk {i}")
+                                    embedding = [float(embedding)]
+                                else:
+                                    logger.warning(f"Could not convert embedding to list for chunk {i}, skipping embedding")
+                                    embedding = []
+                        
+                        # Add embedding to document if it's not empty
+                        if embedding:
+                            doc['content_vector'] = embedding
+                except Exception as e:
+                    logger.error(f"Error processing embedding for chunk {i}: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    # Continue without embedding rather than failing the entire batch
                 
                 # Log document creation for debugging
                 if i < 5:
                     logger.info(f"Created document with id: {sanitized_id}")
                     logger.info(f"Document has content: {'Yes' if chunk.get('content') else 'No'}")
-                    logger.info(f"Document has embedding: {'Yes' if chunk.get('embedding') else 'No'}")
-                    logger.info(f"Document embedding length: {len(chunk.get('embedding', []))}")
+                    logger.info(f"Document has embedding: {'Yes' if embedding_data else 'No'}")
+                    if embedding_data:
+                        logger.info(f"Document embedding length: {len(embedding_data)}")
+                    logger.info(f"Document content_vector in final doc: {'Yes' if 'content_vector' in doc else 'No'}")
+                    if 'content_vector' in doc:
+                        logger.info(f"Document content_vector length: {len(doc['content_vector'])}")
                 
                 # Map metadata fields to index fields based on the schema
                 # Core fields from schema
@@ -509,16 +559,46 @@ class EnhancedAzureSearchClient:
             # Upload documents to the index in batches
             if documents:
                 batch_size = 100  # Azure Search has a limit on batch size
-                for i in range(0, len(documents), batch_size):
-                    batch = documents[i:i+batch_size]
-                    self.search_client.upload_documents(documents=batch)
-                    logger.info(f"Indexed batch of {len(batch)} documents")
+                for batch_idx in range(0, len(documents), batch_size):
+                    try:
+                        batch = documents[batch_idx:batch_idx+batch_size]
+                        
+                        # Validate each document in the batch
+                        valid_batch = []
+                        for doc_idx, doc in enumerate(batch):
+                            try:
+                                # Ensure content_vector is a list if present
+                                if 'content_vector' in doc and not isinstance(doc['content_vector'], list):
+                                    logger.warning(f"Document {batch_idx + doc_idx} has non-list content_vector: {type(doc['content_vector'])}")
+                                    try:
+                                        doc['content_vector'] = list(doc['content_vector'])
+                                    except:
+                                        logger.warning(f"Removing invalid content_vector from document {batch_idx + doc_idx}")
+                                        del doc['content_vector']
+                                
+                                # Add to valid batch
+                                valid_batch.append(doc)
+                            except Exception as doc_e:
+                                logger.error(f"Error validating document {batch_idx + doc_idx}: {str(doc_e)}")
+                                logger.error(traceback.format_exc())
+                        
+                        if valid_batch:
+                            logger.info(f"Uploading batch of {len(valid_batch)} documents (batch {batch_idx//batch_size + 1}/{(len(documents)-1)//batch_size + 1})")
+                            self.search_client.upload_documents(documents=valid_batch)
+                            logger.info(f"Successfully indexed batch of {len(valid_batch)} documents")
+                        else:
+                            logger.warning(f"No valid documents in batch {batch_idx//batch_size + 1}, skipping")
+                    except Exception as batch_e:
+                        logger.error(f"Error indexing batch {batch_idx//batch_size + 1}: {str(batch_e)}")
+                        logger.error(traceback.format_exc())
+                        # Continue with next batch rather than failing the entire indexing process
                 
-                logger.info(f"Successfully indexed {len(documents)} documents")
+                logger.info(f"Completed indexing process for {len(documents)} documents")
                 return True
             else:
                 logger.warning("No valid documents to index")
                 return False
         except Exception as e:
             logger.error(f"Error indexing chunks: {e}")
+            logger.error(traceback.format_exc())
             return False

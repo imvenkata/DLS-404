@@ -694,6 +694,9 @@ def index_chunks(project_ids=None, overwrite=False):
         index_name=AZURE_SEARCH_INDEX_NAME
     )
     
+    # Initialize embeddings generator to use prepare_for_azure_search method
+    embeddings_generator = EmbeddingsGenerator()
+    
     # If overwrite is True, delete existing documents first
     if overwrite:
         logger.info("Overwrite flag is set, deleting existing documents from the index")
@@ -729,45 +732,107 @@ def index_chunks(project_ids=None, overwrite=False):
             
             # Validate and fix chunks before adding them
             valid_chunks = []
-            for chunk in chunks:
-                # Skip chunks without content or embeddings
-                if not chunk.get('content') or not chunk.get('embedding'):
-                    logger.warning(f"Skipping chunk with missing content or embedding: {chunk.get('id', 'unknown')}")
+            for i, chunk in enumerate(chunks):
+                # Debug log to check chunk structure
+                logger.debug(f"Checking chunk {i} from {blob_name}: {list(chunk.keys())}")
+                
+                # Create a normalized chunk with all required fields
+                normalized_chunk = {}
+                
+                # Set ID
+                if chunk.get('id'):
+                    normalized_chunk['id'] = str(chunk['id'])
+                elif 'search_document' in chunk and chunk['search_document'].get('id'):
+                    normalized_chunk['id'] = str(chunk['search_document']['id'])
+                else:
+                    normalized_chunk['id'] = f"chunk_{blob_name}_{i}"
+                
+                # Set content
+                if chunk.get('content'):
+                    normalized_chunk['content'] = chunk['content']
+                elif 'search_document' in chunk and chunk['search_document'].get('content'):
+                    normalized_chunk['content'] = chunk['search_document']['content']
+                elif 'search_document' in chunk and chunk['search_document'].get('content_to_embed'):
+                    normalized_chunk['content'] = chunk['search_document']['content_to_embed']
+                else:
+                    logger.warning(f"Chunk {normalized_chunk['id']} missing content, skipping")
                     continue
                 
-                # Ensure metadata exists
-                if not chunk.get('metadata'):
-                    chunk['metadata'] = {}
+                # Set embedding/content_vector - check all possible locations
+                embedding_found = False
                 
-                # Standardize source_uri in chunk metadata and pass chunk ID for extraction
-                chunk['metadata'] = standardize_source_uri(chunk['metadata'], chunk.get('id'))
+                # First check for embedding in the chunk
+                if chunk.get('embedding') and isinstance(chunk['embedding'], list):
+                    normalized_chunk['embedding'] = chunk['embedding']
+                    normalized_chunk['content_vector'] = chunk['embedding']  # Also set content_vector for Azure Search
+                    embedding_found = True
+                    logger.debug(f"Found embedding at chunk['embedding'] with {len(chunk['embedding'])} dimensions")
                 
-                # Log source_uri for debugging
-                if chunk['metadata'].get('source_uri'):
-                    logger.info(f"Chunk {chunk.get('id', 'unknown')} has source_uri: {chunk['metadata']['source_uri']}")
+                # Then check in search_document
+                elif 'search_document' in chunk:
+                    if chunk['search_document'].get('embedding') and isinstance(chunk['search_document']['embedding'], list):
+                        normalized_chunk['embedding'] = chunk['search_document']['embedding']
+                        normalized_chunk['content_vector'] = chunk['search_document']['embedding']
+                        embedding_found = True
+                        logger.debug(f"Found embedding at chunk['search_document']['embedding'] with {len(chunk['search_document']['embedding'])} dimensions")
+                    elif chunk['search_document'].get('content_vector') and isinstance(chunk['search_document']['content_vector'], list):
+                        normalized_chunk['embedding'] = chunk['search_document']['content_vector']
+                        normalized_chunk['content_vector'] = chunk['search_document']['content_vector']
+                        embedding_found = True
+                        logger.debug(f"Found embedding at chunk['search_document']['content_vector'] with {len(chunk['search_document']['content_vector'])} dimensions")
+                
+                # If no embedding found, try to generate one on-the-fly
+                if not embedding_found and normalized_chunk.get('content'):
+                    try:
+                        logger.info(f"No embedding found for chunk {normalized_chunk['id']}, generating one on-the-fly")
+                        new_embedding = embeddings_generator.generate_embedding(normalized_chunk['content'])
+                        normalized_chunk['embedding'] = new_embedding
+                        normalized_chunk['content_vector'] = new_embedding
+                        embedding_found = True
+                        logger.info(f"Successfully generated embedding with {len(new_embedding)} dimensions")
+                    except Exception as e:
+                        logger.error(f"Failed to generate embedding on-the-fly: {str(e)}")
+                
+                if not embedding_found:
+                    logger.warning(f"Chunk {normalized_chunk['id']} missing valid embedding, skipping")
+                    continue
+                
+                # Set metadata
+                normalized_chunk['metadata'] = {}
+                
+                # Copy metadata from chunk
+                if chunk.get('metadata'):
+                    normalized_chunk['metadata'].update(chunk['metadata'])
+                
+                # Copy metadata from search_document
+                if 'search_document' in chunk:
+                    for key, value in chunk['search_document'].items():
+                        if key not in ['id', 'content', 'content_to_embed', 'embedding', 'content_vector']:
+                            normalized_chunk['metadata'][key] = value
+                
+                # Set source_type
+                if 'search_document' in chunk and chunk['search_document'].get('entity_type'):
+                    normalized_chunk['source_type'] = chunk['search_document']['entity_type']
+                elif 'search_document' in chunk and chunk['search_document'].get('source_type'):
+                    normalized_chunk['source_type'] = chunk['search_document']['source_type']
+                elif chunk.get('metadata', {}).get('entity_type'):
+                    normalized_chunk['source_type'] = chunk['metadata']['entity_type']
+                elif chunk.get('metadata', {}).get('source_type'):
+                    normalized_chunk['source_type'] = chunk['metadata']['source_type']
                 else:
-                    logger.warning(f"Chunk {chunk.get('id', 'unknown')} is missing source_uri after standardization")
-                
-                # Set source_type if missing
-                if not chunk.get('source_type') and chunk['metadata'].get('source_type'):
-                    chunk['source_type'] = chunk['metadata']['source_type']
-                elif not chunk.get('source_type'):
-                    # Try to determine source type from blob name
                     if 'code' in blob_name:
-                        chunk['source_type'] = 'code'
-                        chunk['metadata']['source_type'] = 'code'
+                        normalized_chunk['source_type'] = 'code'
                     elif 'issue' in blob_name:
-                        chunk['source_type'] = 'issue'
-                        chunk['metadata']['source_type'] = 'issue'
+                        normalized_chunk['source_type'] = 'issue'
                     elif 'mr' in blob_name or 'merge_request' in blob_name:
-                        chunk['source_type'] = 'merge_request'
-                        chunk['metadata']['source_type'] = 'merge_request'
-                    elif 'epic' in blob_name:
-                        chunk['source_type'] = 'epic'
-                        chunk['metadata']['source_type'] = 'epic'
+                        normalized_chunk['source_type'] = 'merge_request'
+                    else:
+                        normalized_chunk['source_type'] = 'code'  # Default to code if unknown
                 
-                # Add the validated chunk
-                valid_chunks.append(chunk)
+                # Log embedding dimensions for debugging
+                logger.debug(f"Normalized chunk {normalized_chunk['id']} has embedding with {len(normalized_chunk['content_vector'])} dimensions")
+                
+                valid_chunks.append(normalized_chunk)
             
             logger.info(f"Found {len(valid_chunks)} valid chunks with content and embeddings in {blob_name}")
             all_chunks.extend(valid_chunks)
@@ -778,10 +843,37 @@ def index_chunks(project_ids=None, overwrite=False):
         logger.error("No chunks with embeddings found in any processed blob")
         return False
     
-    logger.info(f"Indexing {len(all_chunks)} chunks in Azure AI Search")
+    # Prepare chunks for Azure Search using EmbeddingsGenerator
+    logger.info(f"Preparing {len(all_chunks)} chunks for Azure Search indexing")
+    search_documents = embeddings_generator.prepare_for_azure_search(all_chunks)
     
-    # Index chunks
-    success = search_client.index_chunks(all_chunks)
+    # Log the first few documents for debugging
+    for i, doc in enumerate(search_documents[:3]):
+        logger.info(f"Document {i} keys: {doc.keys()}")
+        logger.info(f"Document {i} has ID: {doc.get('id', 'missing')}")
+        logger.info(f"Document {i} has content: {'Yes' if doc.get('content') else 'No'}")
+        logger.info(f"Document {i} has content_vector: {'Yes' if doc.get('content_vector') else 'No'}")
+        if doc.get('content_vector'):
+            logger.info(f"Document {i} content_vector dimensions: {len(doc['content_vector'])}")
+        
+        # Ensure content_vector is set if embedding exists but content_vector doesn't
+        if doc.get('embedding') and not doc.get('content_vector'):
+            logger.info(f"Moving embedding to content_vector for document {i}")
+            doc['content_vector'] = doc['embedding']
+            del doc['embedding']
+        
+        # Ensure source_type is set
+        if not doc.get('source_type') and doc.get('metadata', {}).get('source_type'):
+            logger.info(f"Setting source_type from metadata for document {i}")
+            doc['source_type'] = doc['metadata']['source_type']
+        elif not doc.get('source_type'):
+            logger.info(f"Setting default source_type for document {i}")
+            doc['source_type'] = 'code'  # Default to code if unknown
+    
+    logger.info(f"Indexing {len(search_documents)} documents in Azure AI Search")
+    
+    # Index prepared search documents
+    success = search_client.index_chunks(search_documents)
     
     return success
 

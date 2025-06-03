@@ -69,9 +69,20 @@ class KnowledgeAssistant:
             search_index_name: Azure Search index name (optional)
             gitlab_auth_config: Path to GitLab authentication configuration file (optional)
         """
-        self.openai_endpoint = openai_endpoint
+        # Ensure we're using the correct endpoint (not a placeholder)
+        if not openai_endpoint or "placeholder" in openai_endpoint.lower():
+            # Use the known working endpoint from the memory
+            self.openai_endpoint = "https://hackathon-team404.cognitiveservices.azure.com/"
+            logger.warning(f"Replaced placeholder endpoint with actual Azure OpenAI endpoint")
+        else:
+            self.openai_endpoint = openai_endpoint
+            
         self.openai_api_key = openai_api_key
         self.openai_deployment = openai_deployment
+        
+        # Log configuration (with masked key)
+        logger.info(f"Azure OpenAI Endpoint: {self.openai_endpoint}")
+        logger.info(f"Azure OpenAI Deployment: {self.openai_deployment}")
         
         # Initialize GitLab components
         self.gitlab_auth = GitLabAuth(config_file=gitlab_auth_config)
@@ -107,14 +118,23 @@ class KnowledgeAssistant:
     def setup_kernel(self):
         """Set up the Semantic Kernel with Azure OpenAI service."""
         try:
+            # Validate Azure OpenAI configuration
+            if not self.openai_endpoint or not self.openai_api_key or not self.openai_deployment:
+                logger.error("Missing Azure OpenAI configuration")
+                raise ValueError("Missing Azure OpenAI configuration. Please check your environment variables.")
+                
             # Add Azure OpenAI service
-            azure_chat_service = AzureChatCompletion(
-                deployment_name=self.openai_deployment,
-                endpoint=self.openai_endpoint,
-                api_key=self.openai_api_key
-            )
-            self.kernel.add_service(azure_chat_service)
-            logger.info(f"Added Azure OpenAI chat service with deployment {self.openai_deployment}")
+            try:
+                azure_chat_service = AzureChatCompletion(
+                    deployment_name=self.openai_deployment,
+                    endpoint=self.openai_endpoint,
+                    api_key=self.openai_api_key
+                )
+                self.kernel.add_service(azure_chat_service)
+                logger.info(f"Added Azure OpenAI chat service with deployment {self.openai_deployment}")
+            except Exception as e:
+                logger.error(f"Failed to add Azure OpenAI service: {str(e)}")
+                raise ValueError(f"Failed to add Azure OpenAI service: {str(e)}")
             
             # Register GitLab enhanced actions plugin
             self.kernel.add_plugin(self.gitlab_actions, "GitLabActions")
@@ -135,6 +155,9 @@ class KnowledgeAssistant:
             logger.info("Planner initialization skipped - needs updating for newer SK version")
         except Exception as e:
             logger.error(f"Error initializing Knowledge Assistant: {str(e)}")
+            # Log detailed error information for debugging
+            logger.error(f"OpenAI Endpoint: {self.openai_endpoint}")
+            logger.error(f"OpenAI Deployment: {self.openai_deployment}")
             raise
     
     def _register_semantic_functions(self):
@@ -183,32 +206,37 @@ The parameters field should contain any relevant parameters extracted from the q
         from semantic_kernel.prompt_template.prompt_template_config import PromptTemplateConfig
         from semantic_kernel.prompt_template.input_variable import InputVariable
         
-        # Create prompt config
-        prompt_config = PromptTemplateConfig(
-            template=intent_recognition_prompt,
-            description="Recognize the intent of a user query",
-            input_variables=[
-                InputVariable(name="input", description="The user query", is_required=True)
-            ],
-            execution_settings={
-                "default": {
-                    "max_tokens": 500
+        try:
+            # Create prompt config
+            prompt_config = PromptTemplateConfig(
+                template=intent_recognition_prompt,
+                description="Recognize the intent of a user query",
+                input_variables=[
+                    InputVariable(name="input", description="The user query", is_required=True)
+                ],
+                execution_settings={
+                    "default": {
+                        "max_tokens": 500
+                    }
                 }
-            }
-        )
-        
-        # Create the function and add it to the kernel
-        intent_recognition = KernelFunction.from_prompt(
-            prompt=intent_recognition_prompt,
-            function_name="recognize_intent",
-            plugin_name="IntentRecognition",
-            description="Recognize the intent of a user query",
-            prompt_template_config=prompt_config,
-            prompt_execution_settings=None
-        )
-        
-        # Register function with kernel
-        self.kernel.add_function("IntentRecognition", intent_recognition)
+            )
+            
+            # Create the function and add it to the kernel
+            intent_recognition = KernelFunction.from_prompt(
+                prompt=intent_recognition_prompt,
+                function_name="recognize_intent",
+                plugin_name="IntentRecognition",
+                description="Recognize the intent of a user query",
+                prompt_template_config=prompt_config,
+                prompt_execution_settings=None
+            )
+            
+            # Register function with kernel
+            self.kernel.add_function("IntentRecognition", intent_recognition)
+            logger.info("Successfully registered intent recognition function")
+        except Exception as e:
+            logger.error(f"Failed to register intent recognition function: {str(e)}")
+            # Continue with other functions even if this one fails
         
         # Define semantic function for issue creation slot filling
         issue_slot_filling_prompt = """
@@ -248,33 +276,38 @@ Output your analysis as a JSON object with the following structure:
 If ANY required information is missing, include the field name in the 'missing_required_fields' array.
 """
         
-        # Create prompt config for issue slot filling
-        issue_config = PromptTemplateConfig(
-            template=issue_slot_filling_prompt,
-            description="Extract issue creation parameters from user request",
-            input_variables=[
-                InputVariable(name="input", description="The user request", is_required=True)
-            ],
-            execution_settings={
-                "default": {
-                    "max_tokens": 800
+        try:
+            # Create prompt config for issue slot filling
+            issue_slot_config = PromptTemplateConfig(
+                template=issue_slot_filling_prompt,
+                description="Extract issue creation slots from a user request",
+                input_variables=[
+                    InputVariable(name="input", description="The user request", is_required=True)
+                ],
+                execution_settings={
+                    "default": {
+                        "max_tokens": 1000
+                    }
                 }
-            }
-        )
-        
-        # Create the function and add it to the kernel
-        issue_slot_filling = KernelFunction.from_prompt(
-            prompt=issue_slot_filling_prompt,
-            function_name="fill_issue_slots",
-            plugin_name="IssueCreation",
-            description="Extract issue creation parameters from user request",
-            prompt_template_config=issue_config,
-            prompt_execution_settings=None
-        )
-        
-        # Register function with kernel
-        self.kernel.add_function("IssueCreation", issue_slot_filling)
-        
+            )
+            
+            # Create the function and add it to the kernel
+            issue_slot_filling = KernelFunction.from_prompt(
+                prompt=issue_slot_filling_prompt,
+                function_name="extract_issue_slots",
+                plugin_name="IssueCreation",
+                description="Extract issue creation slots from a user request",
+                prompt_template_config=issue_slot_config,
+                prompt_execution_settings=None
+            )
+            
+            # Register function with kernel
+            self.kernel.add_function("IssueCreation", issue_slot_filling)
+            logger.info("Successfully registered issue slot filling function")
+        except Exception as e:
+            logger.error(f"Failed to register issue slot filling function: {str(e)}")
+            # Continue with other functions even if this one fails
+
         # Define semantic function for knowledge discovery with citations
         knowledge_discovery_prompt = """
 You are an AI assistant providing knowledge discovery with cited answers based on retrieved information.
@@ -309,33 +342,38 @@ Example citation with URL: According to [Project Documentation](https://gitlab.c
 Example citation without URL: The chunking system [Source: Code Architecture Document] divides content into logical segments.
 """
         
-        # Create prompt config for knowledge discovery
-        knowledge_discovery_config = PromptTemplateConfig(
-            template=knowledge_discovery_prompt,
-            description="Answer knowledge discovery queries with cited information",
-            input_variables=[
-                InputVariable(name="input", description="The user question", is_required=True),
-                InputVariable(name="context", description="Retrieved information context", is_required=True)
-            ],
-            execution_settings={
-                "default": {
-                    "max_tokens": 1000
+        try:
+            # Create prompt config for knowledge discovery
+            knowledge_discovery_config = PromptTemplateConfig(
+                template=knowledge_discovery_prompt,
+                description="Answer knowledge discovery queries with cited information",
+                input_variables=[
+                    InputVariable(name="input", description="The user question", is_required=True),
+                    InputVariable(name="context", description="Retrieved information context", is_required=True)
+                ],
+                execution_settings={
+                    "default": {
+                        "max_tokens": 1000
+                    }
                 }
-            }
-        )
-        
-        # Create the function and add it to the kernel
-        knowledge_discovery = KernelFunction.from_prompt(
-            prompt=knowledge_discovery_prompt,
-            function_name="answer_knowledge_query",
-            plugin_name="KnowledgeDiscovery",
-            description="Answer knowledge discovery queries with cited information",
-            prompt_template_config=knowledge_discovery_config,
-            prompt_execution_settings=None
-        )
-        
-        # Register function with kernel
-        self.kernel.add_function("KnowledgeDiscovery", knowledge_discovery)
+            )
+            
+            # Create the function and add it to the kernel
+            knowledge_discovery = KernelFunction.from_prompt(
+                prompt=knowledge_discovery_prompt,
+                function_name="answer_knowledge_query",
+                plugin_name="KnowledgeDiscovery",
+                description="Answer knowledge discovery queries with cited information",
+                prompt_template_config=knowledge_discovery_config,
+                prompt_execution_settings=None
+            )
+            
+            # Register function with kernel
+            self.kernel.add_function("KnowledgeDiscovery", knowledge_discovery)
+            logger.info("Successfully registered knowledge discovery function")
+        except Exception as e:
+            logger.error(f"Failed to register knowledge discovery function: {str(e)}")
+            # Continue with other functions even if this one fails
     
     async def process_query(self, query: str) -> str:
         """
@@ -349,35 +387,47 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
         """
         logger.info(f"Processing query: {query}")
         
-        # 1. Determine the intent of the query
-        intent_context = KernelArguments(input=query)
-        intent_result = await self.kernel.invoke(
-            plugin_name="IntentRecognition",
-            function_name="recognize_intent",
-            arguments=intent_context
-        )
-        
-        # 2. Parse the intent result
-        intent = "GENERAL_QUERY"  # Default intent
-        content_type = "GENERAL"  # Default content type
-        confidence = 0.0
         try:
-            # Clean up the result string by removing code fence markers if present
-            intent_str = str(intent_result)
-            if "```json" in intent_str and "```" in intent_str:
-                intent_str = intent_str.split("```json", 1)[1].split("```", 1)[0].strip()
-            elif "```" in intent_str:
-                intent_str = intent_str.split("```", 1)[1].split("```", 1)[0].strip()
-                
-            intent_data = json.loads(intent_str)
-            intent = intent_data.get("intent", "GENERAL_QUERY")
-            content_type = intent_data.get("content_type", "GENERAL")
-            confidence = intent_data.get("confidence", 0.0)
-            logger.info(f"Detected intent: {intent} with confidence: {confidence}")
-            logger.info(f"Detected content type: {content_type}")
+            # 1. Determine the intent of the query
+            intent_context = KernelArguments(input=query)
+            try:
+                intent_result = await self.kernel.invoke(
+                    plugin_name="IntentRecognition",
+                    function_name="recognize_intent",
+                    arguments=intent_context
+                )
+                logger.info(f"Intent recognition successful")
+            except Exception as e:
+                logger.error(f"Error invoking intent recognition: {str(e)}")
+                # Fall back to direct knowledge discovery if intent recognition fails
+                return await self._fallback_knowledge_discovery(query)
+            
+            # 2. Parse the intent result
+            intent = "GENERAL_QUERY"  # Default intent
+            content_type = "GENERAL"  # Default content type
+            confidence = 0.0
+            try:
+                # Clean up the result string by removing code fence markers if present
+                intent_str = str(intent_result)
+                if "```json" in intent_str and "```" in intent_str:
+                    intent_str = intent_str.split("```json", 1)[1].split("```", 1)[0].strip()
+                elif "```" in intent_str:
+                    intent_str = intent_str.split("```", 1)[1].split("```", 1)[0].strip()
+                    
+                intent_data = json.loads(intent_str)
+                intent = intent_data.get("intent", "GENERAL_QUERY")
+                content_type = intent_data.get("content_type", "GENERAL")
+                confidence = intent_data.get("confidence", 0.0)
+                logger.info(f"Detected intent: {intent} with confidence: {confidence}")
+                logger.info(f"Detected content type: {content_type}")
+            except Exception as e:
+                logger.error(f"Error parsing intent result: {str(e)}")
+                logger.error(f"Raw intent result: {intent_result}")
+                # Fall back to direct knowledge discovery if intent parsing fails
+                return await self._fallback_knowledge_discovery(query)
         except Exception as e:
-            logger.error(f"Error parsing intent result: {str(e)}")
-            logger.error(f"Raw intent result: {intent_result}")
+            logger.error(f"Unexpected error in process_query: {str(e)}")
+            return f"I encountered an error processing your query. Please try again or rephrase your question. Error: {str(e)}"
         
         # 3. Process based on intent
         if intent == "KNOWLEDGE_DISCOVERY":
@@ -451,9 +501,18 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
                     AZURE_OPENAI_EMBEDDING_DIMENSION
                 )
                 
+                # Ensure we're using the correct endpoint (not a placeholder)
+                embedding_endpoint = AZURE_OPENAI_ENDPOINT
+                if not embedding_endpoint or "placeholder" in embedding_endpoint.lower():
+                    embedding_endpoint = "https://hackathon-team404.cognitiveservices.azure.com/"
+                    logger.warning(f"Replaced placeholder embedding endpoint with actual Azure OpenAI endpoint")
+                
+                logger.info(f"Using Azure OpenAI embedding endpoint: {embedding_endpoint}")
+                logger.info(f"Using Azure OpenAI embedding deployment: {AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
+                
                 # Initialize embeddings generator
                 embeddings_generator = EmbeddingsGenerator(
-                    endpoint=AZURE_OPENAI_ENDPOINT,
+                    endpoint=embedding_endpoint,
                     api_key=AZURE_OPENAI_KEY,
                     deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                     model=AZURE_OPENAI_EMBEDDING_MODEL,
@@ -568,14 +627,54 @@ Example citation without URL: The chunking system [Source: Code Architecture Doc
             context=context if context else "No relevant information found."
         )
         
-        answer_result = await self.kernel.invoke(
-            plugin_name="KnowledgeDiscovery",
-            function_name="answer_knowledge_query",
-            arguments=qa_context
-        )
-        
-        # In Semantic Kernel 1.32.0, the result is directly the value
-        return str(answer_result)
+        try:
+            # Try using the semantic kernel function
+            answer_result = await self.kernel.invoke(
+                plugin_name="KnowledgeDiscovery",
+                function_name="answer_knowledge_query",
+                arguments=qa_context
+            )
+            
+            # In Semantic Kernel 1.32.0, the result is directly the value
+            return str(answer_result)
+        except Exception as e:
+            logger.error(f"Error invoking knowledge discovery function: {str(e)}")
+            
+            # Fall back to direct OpenAI API call if semantic function fails
+            try:
+                from openai import AzureOpenAI
+                
+                # Ensure we're using the correct endpoint (not a placeholder)
+                endpoint = self.openai_endpoint
+                if not endpoint or "placeholder" in endpoint.lower():
+                    endpoint = "https://hackathon-team404.cognitiveservices.azure.com/"
+                    logger.warning(f"Replaced placeholder endpoint with actual Azure OpenAI endpoint")
+                
+                logger.info(f"Using Azure OpenAI endpoint: {endpoint}")
+                logger.info(f"Using Azure OpenAI deployment: {self.openai_deployment}")
+                
+                client = AzureOpenAI(
+                    api_key=self.openai_api_key,
+                    api_version="2023-05-15",
+                    azure_endpoint=endpoint
+                )
+                
+                context_to_use = context if context else "No relevant information found."
+                
+                response = client.chat.completions.create(
+                    model=self.openai_deployment,
+                    messages=[
+                        {"role": "system", "content": "You are an AI assistant providing knowledge discovery with cited answers based on retrieved information. Provide a comprehensive answer to the user's question using the provided context. Include citations to the sources in your answer using the format [Source: source_name]."},
+                        {"role": "user", "content": f"Question: {query}\n\nContext:\n{context_to_use}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+                
+                return response.choices[0].message.content
+            except Exception as fallback_error:
+                logger.error(f"Fallback OpenAI call also failed: {str(fallback_error)}")
+                return f"I encountered an error while processing your knowledge query. Please try again or rephrase your question. Error: {str(e)}"
     
     async def _process_issue_creation(self, query: str) -> str:
         """
@@ -1076,6 +1175,76 @@ GENERATED CODE:
                 response += f"\n{i}. {source}"
         
         return response
+    
+    async def _fallback_knowledge_discovery(self, query: str) -> str:
+        """
+        Fallback method for knowledge discovery when semantic function invocation fails.
+        This method directly queries Azure Search and generates a response without using Semantic Kernel.
+        
+        Args:
+            query: User query string
+            
+        Returns:
+            Response to the knowledge discovery query with citations
+        """
+        logger.info(f"Using fallback knowledge discovery for query: {query}")
+        
+        try:
+            # Ensure we have a search client
+            if not self.search_client:
+                return "I'm unable to search for information at the moment. Please try again later."
+            
+            # Search for relevant documents
+            search_results = self.search_client.search(
+                query=query,
+                top=5,
+                source_types=None  # Include all source types
+            )
+            
+            if not search_results:
+                return "I couldn't find any relevant information for your query. Please try a different question or provide more details."
+            
+            # Format the search results for the response
+            context = ""
+            for i, result in enumerate(search_results, 1):
+                content = result.get("content", "")
+                source = result.get("source", "Unknown source")
+                source_type = result.get("source_type", "Unknown type")
+                context += f"Document {i}:\nSource: {source}\nType: {source_type}\nContent: {content}\n\n"
+            
+            # Generate a direct response using the OpenAI client
+            try:
+                from openai import AzureOpenAI
+                
+                client = AzureOpenAI(
+                    api_key=self.openai_api_key,
+                    api_version="2023-05-15",
+                    azure_endpoint=self.openai_endpoint
+                )
+                
+                response = client.chat.completions.create(
+                    model=self.openai_deployment,
+                    messages=[
+                        {"role": "system", "content": "You are an AI assistant providing knowledge discovery with cited answers based on retrieved information. Provide a comprehensive answer to the user's question using the provided context. Include citations to the sources in your answer using the format [Source: source_name]."},
+                        {"role": "user", "content": f"Question: {query}\n\nContext:\n{context}"}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+                
+                return response.choices[0].message.content
+            except Exception as e:
+                logger.error(f"Error generating response with OpenAI client: {str(e)}")
+                # Provide a simple response based on the search results
+                answer = f"Here's what I found about '{query}':\n\n"
+                for i, result in enumerate(search_results, 1):
+                    content = result.get("content", "")[:200] + "..." if len(result.get("content", "")) > 200 else result.get("content", "")
+                    source = result.get("source", "Unknown source")
+                    answer += f"{i}. {content} [Source: {source}]\n\n"
+                return answer
+        except Exception as e:
+            logger.error(f"Error in fallback knowledge discovery: {str(e)}")
+            return f"I encountered an error while searching for information. Please try again or rephrase your question. Error: {str(e)}"
     
     async def _process_general_query(self, query: str) -> str:
         """

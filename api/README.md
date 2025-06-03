@@ -2,6 +2,72 @@
 
 This is a FastAPI wrapper for the DLS-404 Enterprise Knowledge Assistant, providing a REST API interface to interact with the assistant's capabilities. The assistant integrates with multiple internal company data sources including GitLab (multiple projects), Confluence, SharePoint, and other internal data sources (planned for future integration).
 
+## New Agentic Knowledge Assistant API
+
+A new API service has been added specifically for the GitLab RAG Knowledge Assistant with improved agentic workflow capabilities. This API leverages the fixed knowledge assistant implementation that includes proper embedding generation, vector search, and response generation with citations.
+
+### Running the Agentic Knowledge Assistant API
+
+To run the new API service:
+
+```bash
+python scripts/run_knowledge_assistant_api.py --reload
+```
+
+This will start the API server on http://localhost:8001 with auto-reload enabled for development (or another available port if 8001 is in use).
+
+### API Endpoints
+
+- **GET /** - Root endpoint with API information
+- **GET /health** - Check the health of the service and its components
+- **POST /query** - Process a query and get a response from the knowledge assistant
+
+## Simplified API (Fallback)
+
+A simplified API has been created as a fallback option that bypasses Semantic Kernel function invocation issues. This API directly uses Azure Search for vector and keyword search without relying on the full agentic workflow.
+
+### Running the Simplified API
+
+To run the simplified API service:
+
+```bash
+python scripts/run_simplified_api.py --reload
+```
+
+This will start the simplified API server on http://localhost:8002 with auto-reload enabled for development.
+
+### Simplified API Endpoints
+
+- **GET /** - Root endpoint with API information
+- **GET /health** - Check the health of the service and its components (Azure OpenAI and Azure Search)
+- **POST /query** - Process a query using direct Azure Search and return relevant content
+  - Optional: Include `source_types` array in the request body to filter by source type
+
+### Testing the Simplified API
+
+You can test the simplified API using the provided shell script:
+
+```bash
+bash scripts/test_simplified_api.sh
+```
+
+Or use the Postman collection which includes a dedicated section for the simplified API endpoints.
+
+## Testing with Postman
+
+A Postman collection is provided in the `postman` directory for testing both APIs. To use it:
+
+1. Import the collection into Postman: `postman/gitlab_rag_knowledge_assistant.postman_collection.json`
+2. Start the desired API server using the commands above
+3. Run the requests in the appropriate section of the collection
+
+The collection includes sample queries for:
+- Chunking system information
+- Embedding generation details
+- Agentic workflow process
+- Issue creation
+- Source type filtering (simplified API)
+
 ## Features
 
 - **Multi-Source Knowledge Integration**: Integrates with GitLab (multiple projects), Confluence, SharePoint, and other internal data sources (planned)
