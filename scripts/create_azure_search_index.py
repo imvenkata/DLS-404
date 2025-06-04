@@ -1,173 +1,275 @@
 #!/usr/bin/env python
 """
-Script to create and populate an Azure AI Search index with processed data.
-Enables embeddings for vector search and content/title for full text search.
+Script to create an enhanced Azure AI Search index for the GitLab RAG application.
+With comprehensive field schema for advanced RAG capabilities including vector search.
 """
 import os
 import sys
-import json
 import logging
-import argparse
-from typing import List, Dict, Any
 from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from search.azure_search import AzureSearchClient
-from storage.blob_storage import BlobStorage
-from processors.embeddings_generator import EmbeddingsGenerator
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import (
+    SearchIndex,
+    SimpleField,
+    SearchableField,
+    SearchField,
+    VectorSearch,
+    VectorSearchAlgorithmKind,
+    VectorSearchAlgorithmMetric,
+    HnswParameters,
+    VectorSearchProfile
+)
+
 from config.config import (
-    AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME,
-    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+    AZURE_SEARCH_ENDPOINT,
+    AZURE_SEARCH_KEY,
+    AZURE_SEARCH_INDEX_NAME,
+    AZURE_OPENAI_EMBEDDING_DIMENSION
 )
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def create_and_populate_index(
-    processed_data_path: str = None,
-    blob_container: str = None,
-    index_name: str = AZURE_SEARCH_INDEX_NAME,
-    search_endpoint: str = AZURE_SEARCH_ENDPOINT,
-    search_key: str = AZURE_SEARCH_KEY,
-    recreate_index: bool = False
+def create_search_index(
+    index_name=AZURE_SEARCH_INDEX_NAME,
+    search_endpoint=AZURE_SEARCH_ENDPOINT,
+    search_key=AZURE_SEARCH_KEY,
+    embedding_dimension=AZURE_OPENAI_EMBEDDING_DIMENSION,
+    recreate_index=False
 ) -> bool:
     """
-    Create and populate an Azure AI Search index with processed data.
+    Create an enhanced search index with vector search capabilities.
     
     Args:
-        processed_data_path: Path to processed data file (local JSON file)
-        blob_container: Name of blob container with processed data
         index_name: Name of the search index
         search_endpoint: Azure AI Search endpoint
         search_key: Azure AI Search API key
+        embedding_dimension: Dimension of the embedding vectors
         recreate_index: Whether to recreate the index if it already exists
         
     Returns:
         True if successful, False otherwise
     """
-    # Validate inputs
-    if not processed_data_path and not blob_container:
-        logger.error("Either processed_data_path or blob_container must be provided")
-        return False
-    
     if not search_endpoint or not search_key:
         logger.error("Azure AI Search credentials not provided")
         return False
     
-    # Initialize search client
-    search_client = AzureSearchClient(
-        endpoint=search_endpoint,
-        api_key=search_key,
-        index_name=index_name
-    )
-    
-    # Delete existing index if recreate_index is True
-    if recreate_index:
-        try:
-            if index_name in [index.name for index in search_client.index_client.list_indexes()]:
-                logger.info(f"Deleting existing index: {index_name}")
-                search_client.index_client.delete_index(index_name)
-                logger.info(f"Index {index_name} deleted")
-        except Exception as e:
-            logger.error(f"Error deleting index: {str(e)}")
-            return False
-    
-    # Create index
-    logger.info(f"Creating search index: {index_name}")
-    if not search_client.create_search_index():
-        logger.error("Failed to create search index")
-        return False
-    
-    # Load processed data
-    processed_chunks = []
-    if processed_data_path:
-        # Load from local file
-        try:
-            logger.info(f"Loading processed data from: {processed_data_path}")
-            with open(processed_data_path, 'r') as f:
-                processed_chunks = json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading processed data: {str(e)}")
-            return False
-    else:
-        # Load from blob storage
-        try:
-            logger.info(f"Loading processed data from blob container: {blob_container}")
-            blob_storage = BlobStorage()
-            processed_chunks = blob_storage.download_processed_data(blob_container)
-        except Exception as e:
-            logger.error(f"Error loading processed data from blob storage: {str(e)}")
-            return False
-    
-    # Validate processed data
-    if not processed_chunks:
-        logger.error("No processed data found")
-        return False
-    
-    logger.info(f"Loaded {len(processed_chunks)} processed chunks")
-    
-    # Check if chunks have embeddings
-    if 'embedding' not in processed_chunks[0]:
-        logger.info("Chunks do not have embeddings, generating them now...")
-        
-        # Initialize embeddings generator
-        embeddings_generator = EmbeddingsGenerator(
-            endpoint=AZURE_OPENAI_ENDPOINT,
-            api_key=AZURE_OPENAI_KEY,
-            deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+    try:
+        # Initialize search index client
+        credential = AzureKeyCredential(search_key)
+        index_client = SearchIndexClient(
+            endpoint=search_endpoint,
+            credential=credential
         )
         
-        # Generate embeddings
-        processed_chunks = embeddings_generator.process_chunks(processed_chunks)
-    
-    # Index chunks
-    logger.info(f"Indexing {len(processed_chunks)} chunks in Azure AI Search")
-    if not search_client.index_chunks(processed_chunks):
-        logger.error("Failed to index chunks")
+        # Check if index already exists
+        existing_indexes = [index.name for index in index_client.list_indexes()]
+        if index_name in existing_indexes:
+            if recreate_index:
+                logger.info(f"Deleting existing index: {index_name}")
+                index_client.delete_index(index_name)
+                logger.info(f"Index {index_name} deleted")
+            else:
+                logger.info(f"Index {index_name} already exists")
+                return True
+        
+        # Define fields based on comprehensive schema
+        fields = [
+            # ID field
+            SimpleField(name="id", type="Edm.String", key=True, filterable=True, retrievable=True),
+            
+            # Content fields
+            SearchableField(name="content", type="Edm.String", analyzer_name="en.microsoft", retrievable=True),
+            SearchableField(name="content_to_embed", type="Edm.String", analyzer_name="en.microsoft", retrievable=True),
+            
+            # Vector embedding field
+            SearchField(
+                name="content_vector",
+                type="Collection(Edm.Single)",
+                searchable=True,
+                filterable=False,
+                retrievable=True,
+                sortable=False,
+                facetable=False,
+                vector_search_dimensions=embedding_dimension,
+                vector_search_profile_name="default-vector-profile"
+            ),
+            
+            # Entity Classification
+            SimpleField(name="entity_type", type="Edm.String", searchable=True, filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="entity_subtype", type="Edm.String", searchable=True, filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="content_type", type="Edm.String", searchable=True, filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="source_system", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="source_type", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            
+            # Titles and Identifiers
+            SearchableField(name="title", type="Edm.String", analyzer_name="en.microsoft", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="chunk_id", type="Edm.String", filterable=True, retrievable=True),
+            SimpleField(name="chunk_index", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            
+            # Temporal Fields
+            SimpleField(name="created_at", type="Edm.DateTimeOffset", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="updated_at", type="Edm.DateTimeOffset", filterable=True, retrievable=True, sortable=True, facetable=True),
+            
+            # Author Information
+            SearchableField(name="author_name", type="Edm.String", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SearchableField(name="author_username", type="Edm.String", filterable=True, retrievable=True, sortable=True, facetable=True),
+            
+            # Status and State
+            SearchableField(name="state", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchableField(name="status_or_state", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            
+            # Epic and Hierarchy
+            SearchableField(name="parent_epic_title", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="parent_epic_id", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="parent_epic_url", type="Edm.String", retrievable=True),
+            
+            # Engagement Metrics
+            SimpleField(name="discussion_count", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="upvotes", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="downvotes", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            
+            # Code-Specific Fields
+            SearchableField(name="file_path", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchableField(name="file_name", type="Edm.String", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="file_extension", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchableField(name="programming_language", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="code_unit_type", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchableField(name="code_unit_name", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="start_line_number", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="end_line_number", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="total_lines", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="has_docstring", type="Edm.Boolean", filterable=True, retrievable=True, facetable=True),
+            
+            # Merge Request Specific
+            SearchableField(name="source_branch", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchableField(name="target_branch", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="source_url", type="Edm.String", retrievable=True),
+            
+            # URLs and Links
+            SimpleField(name="gitlab_url", type="Edm.String", retrievable=True),
+            SimpleField(name="web_url", type="Edm.String", retrievable=True),
+            SimpleField(name="source_uri", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchField(name="linked_items_references", type="Collection(Edm.String)", searchable=True, filterable=True, retrievable=True, facetable=True),
+            
+            # Processing Metadata
+            SimpleField(name="content_hash", type="Edm.String", filterable=True, retrievable=True),
+            SimpleField(name="total_chunks", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="chunk_overlap_start", type="Edm.Int32", filterable=True, retrievable=True),
+            SimpleField(name="chunk_overlap_end", type="Edm.Int32", filterable=True, retrievable=True),
+            
+            # Numerical IDs
+            SimpleField(name="item_internal_id", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
+            SimpleField(name="item_global_id", type="Edm.Int64", filterable=True, retrievable=True, sortable=True, facetable=True)
+        ]
+        
+        # Define vector search with updated profile name
+        vector_search = VectorSearch(
+            algorithms=[
+                {
+                    "name": "hnsw",
+                    "kind": VectorSearchAlgorithmKind.HNSW,
+                    "parameters": HnswParameters(
+                        m=4,
+                        ef_construction=400,
+                        ef_search=500,
+                        metric=VectorSearchAlgorithmMetric.COSINE
+                    )
+                }
+            ],
+            profiles=[
+                VectorSearchProfile(
+                    name="default-vector-profile",
+                    algorithm_configuration_name="hnsw"
+                )
+            ]
+        )
+        
+        # Define semantic search configuration
+        semantic_config = {
+            "configurations": [{
+                "name": "semantic-config",
+                "prioritizedFields": {
+                    "titleField": {
+                        "fieldName": "title"
+                    },
+                    "prioritizedContentFields": [
+                        {
+                            "fieldName": "content"
+                        },
+                        {
+                            "fieldName": "content_to_embed"
+                        }
+                    ],
+                    "prioritizedKeywordsFields": [
+                        {
+                            "fieldName": "programming_language"
+                        },
+                        {
+                            "fieldName": "entity_type"
+                        }
+                    ]
+                }
+            }],
+            "defaultConfiguration": "semantic-config"
+        }
+
+        # Create index with updated schema including vector search only
+        # Note: Semantic search configuration has been removed as it requires newer SDK version
+        index = SearchIndex(
+            name=index_name,
+            fields=fields,
+            vector_search=vector_search
+        )
+        
+        logger.info(f"Creating search index: {index_name}")
+        index_client.create_or_update_index(index)
+        logger.info(f"Successfully created search index: {index_name}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error creating search index: {str(e)}")
         return False
-    
-    logger.info(f"Successfully created and populated index: {index_name}")
-    return True
 
 def main():
-    """Main entry point for the script."""
-    parser = argparse.ArgumentParser(description="Create and populate Azure AI Search index")
+    """
+    Main entry point for the script.
+    """
+    import argparse
     
-    # Data source arguments (mutually exclusive)
-    data_source = parser.add_mutually_exclusive_group(required=True)
-    data_source.add_argument('--processed-data', help='Path to processed data file (local JSON file)')
-    data_source.add_argument('--blob-container', help='Name of blob container with processed data')
-    
-    # Azure AI Search arguments
-    parser.add_argument('--index-name', default=AZURE_SEARCH_INDEX_NAME, help='Name of the search index')
-    parser.add_argument('--search-endpoint', default=AZURE_SEARCH_ENDPOINT, help='Azure AI Search endpoint')
-    parser.add_argument('--search-key', default=AZURE_SEARCH_KEY, help='Azure AI Search API key')
-    
-    # Additional options
-    parser.add_argument('--recreate-index', action='store_true', help='Recreate index if it already exists')
+    parser = argparse.ArgumentParser(description="Create an enhanced Azure AI Search index")
+    parser.add_argument("--index-name", type=str, default=AZURE_SEARCH_INDEX_NAME,
+                        help="Name of the search index")
+    parser.add_argument("--search-endpoint", type=str, default=AZURE_SEARCH_ENDPOINT,
+                        help="Azure AI Search endpoint")
+    parser.add_argument("--search-key", type=str, default=AZURE_SEARCH_KEY,
+                        help="Azure AI Search API key")
+    parser.add_argument("--embedding-dimension", type=int, default=AZURE_OPENAI_EMBEDDING_DIMENSION,
+                        help="Dimension of the embedding vectors")
+    parser.add_argument("--recreate-index", action="store_true",
+                        help="Recreate the index if it already exists")
     
     args = parser.parse_args()
     
-    # Load environment variables
-    load_dotenv()
-    
-    # Create and populate index
-    result = create_and_populate_index(
-        processed_data_path=args.processed_data,
-        blob_container=args.blob_container,
+    # Create search index
+    success = create_search_index(
         index_name=args.index_name,
         search_endpoint=args.search_endpoint,
         search_key=args.search_key,
+        embedding_dimension=args.embedding_dimension,
         recreate_index=args.recreate_index
     )
     
-    if result:
-        logger.info("Index creation and population completed successfully")
+    if success:
+        logger.info("Index creation successful")
     else:
-        logger.error("Index creation and population failed")
+        logger.error("Index creation failed")
         sys.exit(1)
 
 if __name__ == "__main__":
