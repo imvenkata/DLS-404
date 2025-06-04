@@ -187,18 +187,51 @@ DLS-404/
 
 ## Usage
 
-### Data Extraction
+### Data Extraction and Indexing
 
-To extract data from a single GitLab project:
+The system supports extraction from various GitLab data sources and indexing to Azure Cognitive Search. Use the `initialize_pipeline.py` script for the complete pipeline.
+
+#### Complete Azure Search Pipeline
+
+To create the search index and run the full extraction, processing, and indexing pipeline:
 
 ```bash
-python main.py --extract --project-id your_project_id
+# 1. First, create or recreate the Azure Search index
+python scripts/create_azure_search_index.py --recreate-index
 
-# Example:
-python main.py --extract --project-id 69940200,69861496
+# 2. Run the full pipeline (extract, process, embed, and index)
+python scripts/initialize_pipeline.py --all --project-id YOUR_PROJECT_ID
 ```
 
-This will extract:
+#### Individual Pipeline Steps
+
+You can also run individual steps of the pipeline:
+
+```bash
+# Extract data from GitLab only
+python scripts/initialize_pipeline.py --extract --project-id YOUR_PROJECT_ID
+
+# Process extracted data only
+python scripts/initialize_pipeline.py --process --project-id YOUR_PROJECT_ID
+
+# Generate embeddings for processed data only
+python scripts/initialize_pipeline.py --embed --project-id YOUR_PROJECT_ID
+
+# Index processed data to Azure Search only
+python scripts/initialize_pipeline.py --index --project-id YOUR_PROJECT_ID
+```
+
+#### Verify Azure Search Index Population
+
+To verify that metadata fields are properly populated in the Azure Search index:
+
+```bash
+python verify_metadata_population.py
+```
+
+This will output metadata field presence statistics by entity type and show sample documents.
+
+The extraction process will gather:
 - Issues and their comments
 - Merge requests and their comments
 - Commits and their diffs
