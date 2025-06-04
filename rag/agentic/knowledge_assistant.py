@@ -335,11 +335,17 @@ When formatting citations:
 - For code files: [Source: file_path:line_number]
 - Include citations inline within your answer
 
-If the retrieved information does NOT contain the answer:
-- Clearly state: "I couldn't find relevant information to answer your question in the connected knowledge sources."
+If the retrieved information does NOT contain ANY relevant information:
+- Clearly state: "I couldn't find any relevant information to answer your question in the connected knowledge sources."
 - Do NOT generate a general answer or provide guidance
 - Do NOT make up information
 - Suggest what specific sources might contain the answer
+
+If the retrieved information contains RELATED but not EXACT matches to what was requested:
+- Begin with: "While I couldn't find the exact [specific item requested], I found related information that might be helpful:"
+- Then present the relevant information with proper citations
+- Be clear about what was found vs. what was requested
+- Do NOT claim the information perfectly answers the query if it only partially does
 
 Your answer must be:
 1. Source-based - only use information from the retrieved context
@@ -387,7 +393,7 @@ def generate_embeddings(text, model="text-embedding-ada-002"):
             logger.error(f"Failed to register knowledge discovery function: {str(e)}")
             # Continue with other functions even if this one fails
     
-    async def process_query(self, query: str) -> str:
+    async def process_query(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """
         Process a user query.
         
@@ -442,20 +448,28 @@ def generate_embeddings(text, model="text-embedding-ada-002"):
             return f"I encountered an error processing your query. Please try again or rephrase your question. Error: {str(e)}"
         
         # 3. Process based on intent
+        # Initialize metadata if not provided
+        if metadata is None:
+            metadata = {}
+            
+        logger.info(f"Processing with metadata: {metadata}")
+            
         if intent == "KNOWLEDGE_DISCOVERY":
-            return await self._process_knowledge_discovery(query, content_type)
+            # Pass metadata to knowledge discovery process
+            return await self._process_knowledge_discovery(query, content_type, metadata)
         elif intent == "ISSUE_CREATION":
             return await self._process_issue_creation(query)
         elif intent == "STATUS_REPORT":
-            return await self._process_status_report(query, {}, content_type)
+            return await self._process_status_report(query, metadata, content_type)
         elif intent == "AUTHENTICATION":
-            return await self._process_authentication(query, {})
+            return await self._process_authentication(query, metadata)
         elif intent == "CODE_GENERATION":
             return await self._process_code_generation(query, content_type)
         else:  # GENERAL_QUERY
-            return await self._process_general_query(query)
+            # For general queries, also leverage the knowledge discovery with metadata
+            return await self._process_knowledge_discovery(query, "GENERAL", metadata)
     
-    async def _process_knowledge_discovery(self, query: str, content_type: str) -> str:
+    async def _process_knowledge_discovery(self, query: str, content_type: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """
         Process a knowledge discovery query with cited answers.
         
@@ -701,7 +715,11 @@ Source: DLS-404 Internal Documentation, ChunkingFunction Azure Function
             # For chunking queries, search across all source types without filtering
             source_types = None
             content_type = "DOCUMENTATION"
-        # Map content_type to source_types for filtering for other queries
+        # Apply metadata source_types if provided, otherwise map content_type to source_types for filtering
+        if metadata and "source_types" in metadata:
+            # Override source_types with metadata if provided
+            source_types = metadata.get("source_types")
+            logger.info(f"Using source_types from metadata: {source_types}")
         elif content_type == "DOCUMENTATION":
             # For documentation queries, search across all source types with priority on code
             # Documentation is often stored in code repositories as markdown files
@@ -719,8 +737,17 @@ Source: DLS-404 Internal Documentation, ChunkingFunction Azure Function
             # For general queries, search across multiple types
             source_types = ["code", "issue", "merge_request", "epic"]
         
-        # Set up filters if needed for other criteria
+        # Set up filters if needed based on metadata
         filters = None
+        if metadata and "filters" in metadata:
+            filters = metadata.get("filters")
+            logger.info(f"Using custom filters from metadata: {filters}")
+            
+        # Flag to ensure all responses have citations
+        require_citations = True
+        if metadata and "require_citations" in metadata:
+            require_citations = metadata.get("require_citations")
+            logger.info(f"Citation requirement from metadata: {require_citations}")
         
         logger.info(f"Filtering search results by content type: {content_type}, source_types: {source_types}")
         
@@ -898,19 +925,43 @@ Source: DLS-404 Internal Documentation, ChunkingFunction Azure Function
                                 else: lang = ext
                             
                             # Format code with proper markdown code block
+                            # Get GitLab URL if available (from different possible field names)
+                            gitlab_url = result.get("gitlab_url", "") or result.get("web_url", "") 
+                            if not gitlab_url and "url" in result:
+                                gitlab_url = result.get("url", "")
+                            
                             # Include line/chunk information in citation when available
                             location_info = f":{chunk_number}" if chunk_number else ""
                             
-                            if source_uri:
-                                formatted_result = f"[Source: {file_path}{location_info} | Type: {source_type} | URL: {source_uri}]\n```{lang}\n{content}\n```\n"
-                            else:
-                                formatted_result = f"[Source: {file_path}{location_info} | Type: {source_type}]\n```{lang}\n{content}\n```\n"
+                            # Generate a GitLab URL if one is not available
+                            if not gitlab_url and not source_uri:
+                                # Construct URL using standard GitLab format
+                                if file_path:
+                                    gitlab_url = f"https://gitlab.com/dls-404/DLS-404/-/blob/master/{file_path}"
+                            
+                            # Use the URL we found or generated
+                            url_to_use = gitlab_url or source_uri
+                            
+                            # Always include URL in the citation
+                            formatted_result = f"[Source: {file_path}{location_info} | Type: {source_type} | URL: {url_to_use or 'Not Available'}]\n```{lang}\n{content}\n```\n"
                         else:
                             # Standard formatting for non-code content
-                            if source_uri:
-                                formatted_result = f"[Source: {source} | Type: {source_type} | URL: {source_uri}]\n{content}\n"
-                            else:
-                                formatted_result = f"[Source: {source} | Type: {source_type}]\n{content}\n"
+                            # Get GitLab URL if available (from different possible field names)
+                            gitlab_url = result.get("gitlab_url", "") or result.get("web_url", "") 
+                            if not gitlab_url and "url" in result:
+                                gitlab_url = result.get("url", "")
+                                
+                            # Generate a GitLab URL if one is not available
+                            if not gitlab_url and not source_uri:
+                                # Construct URL using standard GitLab format if we have a path-like source
+                                if "/" in source or "." in source:
+                                    gitlab_url = f"https://gitlab.com/dls-404/DLS-404/-/blob/master/{source}"
+                            
+                            # Use the URL we found or generated
+                            url_to_use = gitlab_url or source_uri
+                            
+                            # Always include URL in the citation
+                            formatted_result = f"[Source: {source} | Type: {source_type} | URL: {url_to_use or 'Not Available'}]\n{content}\n"
                         
                         formatted_results.append(formatted_result)
                     
