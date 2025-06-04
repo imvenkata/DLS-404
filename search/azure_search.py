@@ -295,7 +295,7 @@ class AzureSearchClient:
                     # Required fields
                     'id': sanitized_id,
                     'original_content': chunk.get('content', ''),
-                    'content_vector': chunk.get('embedding', []),
+                    'content_vector': chunk.get('content_vector', chunk.get('embedding', [])),
                 }
                 
                 # Add metadata fields if available

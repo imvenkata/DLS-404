@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-Script to create an enhanced Azure AI Search index for the GitLab RAG application.
-With comprehensive field schema for advanced RAG capabilities including vector search.
+Script to create an optimized Azure AI Search index for GitLab RAG application.
+Designed for hybrid search with consistent field naming and improved relevance.
 """
 import os
 import sys
@@ -44,7 +44,7 @@ def create_search_index(
     recreate_index=False
 ) -> bool:
     """
-    Create an enhanced search index with vector search capabilities.
+    Create an optimized search index with hybrid search capabilities for GitLab data.
     
     Args:
         index_name: Name of the search index
@@ -79,104 +79,89 @@ def create_search_index(
                 logger.info(f"Index {index_name} already exists")
                 return True
         
-        # Define fields based on comprehensive schema
+        # Define fields for optimal hybrid search
         fields = [
-            # ID field
+            # Core fields - required for all entities
             SimpleField(name="id", type="Edm.String", key=True, filterable=True, retrievable=True),
-            
-            # Content fields
+            SearchableField(name="title", type="Edm.String", analyzer_name="en.microsoft", 
+                          filterable=True, retrievable=True, sortable=True),
             SearchableField(name="content", type="Edm.String", analyzer_name="en.microsoft", retrievable=True),
-            SearchableField(name="content_to_embed", type="Edm.String", analyzer_name="en.microsoft", retrievable=True),
             
-            # Vector embedding field
+            # Vector embedding field - standardized field name across all data types
             SearchField(
                 name="content_vector",
                 type="Collection(Edm.Single)",
                 searchable=True,
-                filterable=False,
                 retrievable=True,
-                sortable=False,
-                facetable=False,
                 vector_search_dimensions=embedding_dimension,
                 vector_search_profile_name="default-vector-profile"
             ),
             
-            # Entity Classification
-            SimpleField(name="entity_type", type="Edm.String", searchable=True, filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="entity_subtype", type="Edm.String", searchable=True, filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="content_type", type="Edm.String", searchable=True, filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="source_system", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="source_type", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            
-            # Titles and Identifiers
-            SearchableField(name="title", type="Edm.String", analyzer_name="en.microsoft", filterable=True, retrievable=True, sortable=True),
-            SimpleField(name="chunk_id", type="Edm.String", filterable=True, retrievable=True),
-            SimpleField(name="chunk_index", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            
-            # Temporal Fields
-            SimpleField(name="created_at", type="Edm.DateTimeOffset", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="updated_at", type="Edm.DateTimeOffset", filterable=True, retrievable=True, sortable=True, facetable=True),
-            
-            # Author Information
-            SearchableField(name="author_name", type="Edm.String", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SearchableField(name="author_username", type="Edm.String", filterable=True, retrievable=True, sortable=True, facetable=True),
-            
-            # Status and State
-            SearchableField(name="state", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SearchableField(name="status_or_state", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            
-            # Epic and Hierarchy
-            SearchableField(name="parent_epic_title", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="parent_epic_id", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="parent_epic_url", type="Edm.String", retrievable=True),
-            
-            # Engagement Metrics
-            SimpleField(name="discussion_count", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="upvotes", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="downvotes", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            
-            # Code-Specific Fields
-            SearchableField(name="file_path", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SearchableField(name="file_name", type="Edm.String", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="file_extension", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SearchableField(name="programming_language", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="code_unit_type", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SearchableField(name="code_unit_name", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="start_line_number", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
-            SimpleField(name="end_line_number", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
-            SimpleField(name="total_lines", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="has_docstring", type="Edm.Boolean", filterable=True, retrievable=True, facetable=True),
-            
-            # Merge Request Specific
-            SearchableField(name="source_branch", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SearchableField(name="target_branch", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SimpleField(name="source_url", type="Edm.String", retrievable=True),
-            
-            # URLs and Links
-            SimpleField(name="gitlab_url", type="Edm.String", retrievable=True),
+            # Common metadata fields for all GitLab entities
+            SearchField(name="entity_type", type="Edm.String", filterable=True, searchable=True, retrievable=True, facetable=True),  
+            SimpleField(name="project_id", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="gitlab_id", type="Edm.String", filterable=True, retrievable=True),
             SimpleField(name="web_url", type="Edm.String", retrievable=True),
-            SimpleField(name="source_uri", type="Edm.String", filterable=True, retrievable=True, facetable=True),
-            SearchField(name="linked_items_references", type="Collection(Edm.String)", searchable=True, filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="created_at", type="Edm.DateTimeOffset", filterable=True, retrievable=True, 
+                       sortable=True, facetable=True),
+            SimpleField(name="updated_at", type="Edm.DateTimeOffset", filterable=True, retrievable=True, 
+                       sortable=True, facetable=True),
+            SimpleField(name="author_username", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SearchableField(name="author_name", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="labels", type="Collection(Edm.String)", filterable=True, retrievable=True, facetable=True),
             
-            # Processing Metadata
-            SimpleField(name="content_hash", type="Edm.String", filterable=True, retrievable=True),
-            SimpleField(name="total_chunks", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="chunk_overlap_start", type="Edm.Int32", filterable=True, retrievable=True),
-            SimpleField(name="chunk_overlap_end", type="Edm.Int32", filterable=True, retrievable=True),
+            # Chunking metadata
+            SimpleField(name="chunk_id", type="Edm.String", filterable=True, retrievable=True),
+            SimpleField(name="chunk_index", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="total_chunks", type="Edm.Int32", filterable=True, retrievable=True),
             
-            # Numerical IDs
-            SimpleField(name="item_internal_id", type="Edm.Int32", filterable=True, retrievable=True, sortable=True, facetable=True),
-            SimpleField(name="item_global_id", type="Edm.Int64", filterable=True, retrievable=True, sortable=True, facetable=True)
+            # Issue & Epic specific fields
+            SearchableField(name="description", type="Edm.String", analyzer_name="en.microsoft", retrievable=True),
+            SimpleField(name="state", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="milestone", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="assignees", type="Collection(Edm.String)", filterable=True, retrievable=True, facetable=True),
+            
+            # MR specific fields
+            SimpleField(name="source_branch", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="target_branch", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="merged", type="Edm.Boolean", filterable=True, retrievable=True, facetable=True),
+            
+            # Code specific fields
+            SimpleField(name="file_path", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="file_name", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="file_extension", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="language", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="code_unit_type", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="code_unit_name", type="Edm.String", filterable=True, retrievable=True),
+            SimpleField(name="start_line", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="end_line", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            
+            # Epic specific fields
+            SimpleField(name="group_id", type="Edm.String", filterable=True, retrievable=True, facetable=True),
+            SimpleField(name="parent_epic_id", type="Edm.String", filterable=True, retrievable=True),
+            SimpleField(name="parent_epic_title", type="Edm.String", filterable=True, retrievable=True),
+            
+            # Engagement and importance metrics
+            SimpleField(name="upvotes", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="downvotes", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            SimpleField(name="discussion_count", type="Edm.Int32", filterable=True, retrievable=True, sortable=True),
+            
+            # Relationship fields
+            SimpleField(name="related_items", type="Collection(Edm.String)", filterable=True, retrievable=True),
+            
+            # Dynamic fields for entity-specific metadata that doesn't fit elsewhere
+            # These can vary by entity type but are still searchable and filterable
+            SearchField(name="custom_metadata", type="Edm.String", retrievable=True)
         ]
         
-        # Define vector search with updated profile name
+        # Define vector search configuration
         vector_search = VectorSearch(
             algorithms=[
                 {
                     "name": "hnsw",
                     "kind": VectorSearchAlgorithmKind.HNSW,
                     "parameters": HnswParameters(
-                        m=4,
+                        m=8,  # Increased from 4 for better recall
                         ef_construction=400,
                         ef_search=500,
                         metric=VectorSearchAlgorithmMetric.COSINE
@@ -191,44 +176,21 @@ def create_search_index(
             ]
         )
         
-        # Define semantic search configuration
-        semantic_config = {
-            "configurations": [{
-                "name": "semantic-config",
-                "prioritizedFields": {
-                    "titleField": {
-                        "fieldName": "title"
-                    },
-                    "prioritizedContentFields": [
-                        {
-                            "fieldName": "content"
-                        },
-                        {
-                            "fieldName": "content_to_embed"
-                        }
-                    ],
-                    "prioritizedKeywordsFields": [
-                        {
-                            "fieldName": "programming_language"
-                        },
-                        {
-                            "fieldName": "entity_type"
-                        }
-                    ]
-                }
-            }],
-            "defaultConfiguration": "semantic-config"
-        }
-
-        # Create index with updated schema including vector search only
-        # Note: Semantic search configuration has been removed as it requires newer SDK version
+        # Create the search index with vector search configurations
+        # Note: Semantic search configuration is removed as it's not supported in your SDK version
+        # You can upgrade the SDK or use a semantic ranker at query time instead
         index = SearchIndex(
             name=index_name,
             fields=fields,
             vector_search=vector_search
         )
         
+        # Create the index
         logger.info(f"Creating search index: {index_name}")
+        index_client.create_index(index)
+        logger.info(f"Successfully created search index: {index_name}")
+        
+        return True
         index_client.create_or_update_index(index)
         logger.info(f"Successfully created search index: {index_name}")
         
@@ -243,8 +205,16 @@ def main():
     """
     import argparse
     
+    # Re-load environment variables to ensure we get the latest values
+    load_dotenv(override=True)
+    env_index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
+    
+    # Print debug information
+    logger.info(f"Environment variable AZURE_SEARCH_INDEX_NAME = '{env_index_name}'")
+    logger.info(f"Config module AZURE_SEARCH_INDEX_NAME = '{AZURE_SEARCH_INDEX_NAME}'")
+    
     parser = argparse.ArgumentParser(description="Create an enhanced Azure AI Search index")
-    parser.add_argument("--index-name", type=str, default=AZURE_SEARCH_INDEX_NAME,
+    parser.add_argument("--index-name", type=str, default=env_index_name or AZURE_SEARCH_INDEX_NAME,
                         help="Name of the search index")
     parser.add_argument("--search-endpoint", type=str, default=AZURE_SEARCH_ENDPOINT,
                         help="Azure AI Search endpoint")
@@ -256,6 +226,8 @@ def main():
                         help="Recreate the index if it already exists")
     
     args = parser.parse_args()
+    
+    logger.info(f"Creating search index with name: '{args.index_name}'")
     
     # Create search index
     success = create_search_index(
