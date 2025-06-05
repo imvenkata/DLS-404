@@ -483,12 +483,12 @@ def generate_embeddings(text, model="text-embedding-ada-002"):
         logger.info(f"Processing knowledge discovery query: {query}")
         
         # Check for specific query types that need specialized handling
-        chunking_keywords = ["chunking", "chunk", "strategy", "documentation", "docs", "split", "segmentation", "text division", "break down", "partition"]
-        code_snippet_keywords = ["code", "snippet", "function", "class", "implementation", "method", "module", "source code", "algorithm", "sample", "example"]
+        chunking_keywords = ["chunking", "chunk", "split", "divide"]
+        code_snippet_keywords = ["code", "function", "class", "method", "implement"]
         
         # Detect query types
         is_chunking_query = any(keyword in query.lower() for keyword in chunking_keywords)
-        is_code_snippet_query = any(keyword in query.lower() for keyword in code_snippet_keywords) and ("show me" in query.lower() or "provide" in query.lower() or "snippet" in query.lower() or "code" in query.lower() or "function" in query.lower() or "implementation" in query.lower())
+        is_code_snippet_query = any(keyword in query.lower() for keyword in code_snippet_keywords)
         
         # Special handling for embedding function queries - with enhanced debugging
         logger.info(f"Query received: '{query}'")
@@ -810,21 +810,20 @@ Source: DLS-404 Internal Documentation, ChunkingFunction Azure Function
                 except Exception as e:
                     logger.error(f"Error generating embedding: {str(e)}")
                     logger.info("Falling back to keyword search without embedding")
-                    # Fallback to keyword search without embedding
+                    # Fallback to keyword search without embedding - search all data by default
                     search_results = self.search_client.search(
                         query=query, 
-                        source_types=source_types, 
-                        filters=filters,
+                        source_types=None,  # No source type filtering - search all data
+                        filters=None,       # No filters - search all data
                         use_vector_search=False
                     )
                     
-                    # If no results found with the initial filter, try a broader search
-                    if not search_results:
-                        logger.info(f"No results found with keyword search and source_types={source_types}. Trying broader search with all source types.")
-                        # Try again with all source types
+                    # Only if no results found and source_types specified, try with filters
+                    if not search_results and source_types:
+                        logger.info(f"No results found with unfiltered keyword search. Trying with specified source_types={source_types}.")
                         search_results = self.search_client.search(
                             query=query, 
-                            source_types=["code", "issue", "merge_request", "epic"], 
+                            source_types=source_types,
                             filters=filters,
                             use_vector_search=False
                         )
@@ -973,7 +972,7 @@ Source: DLS-404 Internal Documentation, ChunkingFunction Azure Function
                 logger.error(f"Error retrieving search results: {str(e)}")
         
         # 2. Answer the question using the retrieved context
-        # If this is a chunking query and we have results but no relevant answer, try the direct OpenAI fallback
+        # Special handling for specific query types
         if is_chunking_query:
             logger.info(f"Using direct approach for chunking query: {query}")
             # Create a more direct prompt for chunking
@@ -997,6 +996,74 @@ Source: DLS-404 Internal Documentation, ChunkingFunction Azure Function
             except Exception as e:
                 logger.error(f"Error with direct OpenAI call for chunking: {str(e)}")
                 # Fall through to semantic kernel if direct call fails
+                
+        # Enhanced search for important knowledge queries
+        # For queries about program charter and other important documentation
+        # Try multiple variations of the search to maximize recall
+        elif any(keyword in query.lower() for keyword in ["charter", "program", "objective", "initiative", "goal"]):
+            logger.info(f"Detected important knowledge query: {query}")
+            
+            # If context is not satisfactory, try additional searches
+            if not context or len(context) < 100:
+                logger.info("Initial search results are insufficient, trying enhanced search")
+                try:
+                    # Try searching with different keyword combinations
+                    enhanced_results = []
+                    search_variations = [
+                        "charter", 
+                        "program charter", 
+                        "project charter", 
+                        "objectives", 
+                        "program objectives",
+                        "goals",
+                        "initiatives"
+                    ]
+                    
+                    for search_term in search_variations:
+                        logger.info(f"Trying enhanced search with term: {search_term}")
+                        # Use pure keyword search without filters for maximum recall
+                        variation_results = self.search_client.search(
+                            query=search_term,
+                            source_types=None,  # No filtering by source type
+                            filters=None,       # No additional filters
+                            use_vector_search=False  # Use keyword search for precision
+                        )
+                        if variation_results:
+                            logger.info(f"Found {len(variation_results)} results with search term: {search_term}")
+                            enhanced_results.extend(variation_results)
+                    
+                    # Deduplicate results
+                    if enhanced_results:
+                        seen_ids = set()
+                        unique_results = []
+                        
+                        for result in enhanced_results:
+                            result_id = result.get("id", "")
+                            if result_id not in seen_ids:
+                                seen_ids.add(result_id)
+                                unique_results.append(result)
+                        
+                        logger.info(f"Collected {len(unique_results)} unique results after deduplication")
+                        
+                        # Format the enhanced results
+                        formatted_results = []
+                        for result in unique_results:
+                            content = result.get("content", "")
+                            title = result.get("title", "Unknown Title")
+                            source = result.get("source_name", "Unknown Source")
+                            web_url = result.get("web_url", "")
+                            
+                            formatted_result = f"[Source: {title} | URL: {web_url}]\n{content}\n"
+                            formatted_results.append(formatted_result)
+                        
+                        enhanced_context = "\n\n---\n\n".join(formatted_results)
+                        
+                        # Only update context if we found better results
+                        if len(enhanced_context) > len(context):
+                            context = enhanced_context
+                            logger.info(f"Enhanced context built with {len(formatted_results)} documents")
+                except Exception as e:
+                    logger.error(f"Error during enhanced search: {str(e)}")
         
         # Standard semantic kernel approach for non-chunking or fallback
         qa_context = KernelArguments(
@@ -1726,22 +1793,23 @@ GENERATED CODE:
                     logger.info("Generating embedding for query")
                     query_embedding = embeddings_generator.generate_embedding(query)
                     logger.info(f"Generated embedding with dimension {len(query_embedding)}")
-                    # Apply source_type filter if available and use vector search
+                    
+                    # First try without source type filters - search all data
                     search_results = self.search_client.search(
                         query=query, 
                         embedding=query_embedding,
-                        source_types=source_types, 
-                        filters=filters,
+                        source_types=None,  # No source type filtering - search all data 
+                        filters=None,       # No filters - search all data
                         use_vector_search=True
                     )
-                    # If no results found with the initial filter, try a broader search
-                    if not search_results:
-                        logger.info(f"No results found with source_types={source_types}. Trying broader search with all source types.")
-                        # Try again with all source types
+                    
+                    # Only if no results found, try with source_type filter
+                    if not search_results and source_types:
+                        logger.info(f"No results found with unfiltered search. Trying with specified source_types={source_types}.")
                         search_results = self.search_client.search(
                             query=query, 
                             embedding=query_embedding,
-                            source_types=["code", "issue", "merge_request", "epic"], 
+                            source_types=source_types, 
                             filters=filters,
                             use_vector_search=True
                         )

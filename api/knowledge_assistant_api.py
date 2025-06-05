@@ -409,10 +409,10 @@ Note: There is also a batch version of this function called `generate_embeddings
         
         return {
             "status": "success",
-            "message": response,
+            "message": formatted_response["message"],
             "data": {
                 "query": query,
-                "components": formatted_response
+                "components": formatted_response["data"]["components"]
             }
         }
         
@@ -424,7 +424,7 @@ Note: There is also a batch version of this function called `generate_embeddings
             "message": f"An error occurred while processing your query: {str(e)}",
             "data": {"query": query}
         }
-        
+    
 def format_response_for_frontend(response: str, query: str) -> dict:
     """
     Transform the raw text response into a structured format suitable for Node.js frontend presentation
@@ -436,17 +436,52 @@ def format_response_for_frontend(response: str, query: str) -> dict:
     Returns:
         A structured response object for the frontend with parsed components and ordering information
     """
+    # Create a working copy of the response that we'll modify for the message field
+    message_response = response
+    
+    # Replace plain source citations with clickable markdown links in the message field
+    source_pattern = re.compile(r'\[(Source:\s+([^\]|]+))\]')
+    source_replacements = {}
+    
+    # First collect all sources from the structured sources we extract later
+    extracted_sources = {}
+    
+    # Extract source citations to build our URL mappings
+    sources_extract_pattern = re.compile(r'\[(Source:\s+[^\]]+)\]|\[Source:\s+([^\]]+)\]\(([^\)]+)\)')
+    for match in sources_extract_pattern.finditer(response):
+        if match.group(1):  # Standard citation format
+            source_text = match.group(1)
+            path_match = re.search(r'Source:\s*([^|\]]+)', source_text)
+            if path_match:
+                path = path_match.group(1).strip()
+                url = f"https://gitlab.com/dls-404/DLS-404/-/blob/master/{path}"
+                extracted_sources[path] = url
+        elif match.group(2) and match.group(3):  # Markdown link format
+            path = match.group(2).strip()
+            url = match.group(3)
+            extracted_sources[path] = url
+    
+    # Now process the message response and replace citations with markdown links
+    for match in source_pattern.finditer(message_response):
+        full_match = match.group(0)  # The entire [Source: path] text
+        path_part = match.group(2).strip()  # Just the path
+        
+        if path_part in extracted_sources:
+            url = extracted_sources[path_part]
+            replacement = f"[Source: {path_part}]({url})"
+            message_response = message_response.replace(full_match, replacement)
+    
     # Initialize the base response structure
     result = {
         "status": "success",
-        "message": response,  # Include the raw markdown response for backwards compatibility
+        "message": message_response,  
         "data": {
             "query": query,
             "components": {
-                "elements": [],    # All components with position info for correct display order
-                "codeBlocks": [], # Reference by type for convenience
-                "sections": [],   # Reference by type for convenience
-                "sources": []     # Reference by type for convenience
+                "elements": [],    
+                "codeBlocks": [], 
+                "sections": [],   
+                "sources": []     
             }
         }
     }
