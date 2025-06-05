@@ -93,3 +93,9 @@ yarn-error.log*
 
 # Project specific
 uv.lock
+
+# User-specified directories
+archive/
+sample storage/
+postman/
+backup_scripts/

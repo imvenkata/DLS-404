@@ -59,6 +59,13 @@ class CommitsExtractor(GitLabExtractor):
                 if 'message' in commit_data:
                     metadata['message'] = commit_data['message']
                 
+                # Add source_url for citation purposes
+                if 'web_url' in commit_data:
+                    metadata['source_url'] = commit_data['web_url']
+                elif 'id' in commit_data and project_id:
+                    # Construct GitLab URL if not available
+                    metadata['source_url'] = f"https://gitlab.com/dls-404/DLS-404/-/commit/{commit_data['id']}"
+                
                 # Add metadata to commit data
                 commit_data['metadata'] = metadata
                 commits.append(commit_data)

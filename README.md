@@ -2,6 +2,13 @@
 
 This repository contains a modular implementation of a Retrieval-Augmented Generation (RAG) application that uses GitLab data sources and Azure services. The application includes both standard RAG capabilities and an enhanced agentic RAG system that can take actions based on user queries.
 
+## Latest Updates
+
+- **Semantic Kernel 1.32.0 Compatibility**: The codebase has been updated to work with Semantic Kernel 1.32.0, addressing breaking changes from previous versions.
+- **Enhanced Issue Creation Workflow**: Added a multi-step workflow for creating GitLab issues with draft review and confirmation steps.
+- **Enhanced Query Intent Recognition**: Improved intent recognition to detect both user intent (technical question, issue creation, etc.) and content type (code, issue, merge request, epic).
+- **Content Type-Based Search Filtering**: Added intelligent filtering of search results based on detected content type to improve response relevance.
+
 ## Table of Contents
 
 - [GitLab RAG Application with Azure Services](#gitlab-rag-application-with-azure-services)
@@ -180,18 +187,51 @@ DLS-404/
 
 ## Usage
 
-### Data Extraction
+### Data Extraction and Indexing
 
-To extract data from a single GitLab project:
+The system supports extraction from various GitLab data sources and indexing to Azure Cognitive Search. Use the `initialize_pipeline.py` script for the complete pipeline.
+
+#### Complete Azure Search Pipeline
+
+To create the search index and run the full extraction, processing, and indexing pipeline:
 
 ```bash
-python main.py --extract --project-id your_project_id
+# 1. First, create or recreate the Azure Search index
+python scripts/create_azure_search_index.py --recreate-index
 
-# Example:
-python main.py --extract --project-id 69940200,69861496
+# 2. Run the full pipeline (extract, process, embed, and index)
+python scripts/initialize_pipeline.py --all --project-id YOUR_PROJECT_ID
 ```
 
-This will extract:
+#### Individual Pipeline Steps
+
+You can also run individual steps of the pipeline:
+
+```bash
+# Extract data from GitLab only
+python scripts/initialize_pipeline.py --extract --project-id YOUR_PROJECT_ID
+
+# Process extracted data only
+python scripts/initialize_pipeline.py --process --project-id YOUR_PROJECT_ID
+
+# Generate embeddings for processed data only
+python scripts/initialize_pipeline.py --embed --project-id YOUR_PROJECT_ID
+
+# Index processed data to Azure Search only
+python scripts/initialize_pipeline.py --index --project-id YOUR_PROJECT_ID
+```
+
+#### Verify Azure Search Index Population
+
+To verify that metadata fields are properly populated in the Azure Search index:
+
+```bash
+python verify_metadata_population.py
+```
+
+This will output metadata field presence statistics by entity type and show sample documents.
+
+The extraction process will gather:
 - Issues and their comments
 - Merge requests and their comments
 - Commits and their diffs
@@ -265,19 +305,16 @@ python tools/configure_extractors.py --disable-code
 
 The configuration is stored in `config/extractor_config.json` and is respected by the extraction pipeline.
 
-### Optimized Pipeline (Without Commits)
+### Optimized Pipeline Configuration
 
-For better performance, you can use the optimized pipeline that excludes commits by default:
+For better performance, it's recommended to exclude commits from the extraction process:
 
 ```bash
-# Run the complete optimized pipeline without commits
-python tools/run_optimized_pipeline.py --all --project-id "your_project_id"
+# Run the complete pipeline without commits
+python scripts/initialize_pipeline.py --all --no-commits
 
-# Run specific steps of the optimized pipeline
-python tools/run_optimized_pipeline.py --extract --process --project-id "your_project_id"
-
-# Include commits if needed (not recommended for initial setup)
-python tools/run_optimized_pipeline.py --all --project-id "your_project_id" --enable-commits
+# Run specific steps of the pipeline
+python scripts/initialize_pipeline.py --extract --process --no-commits
 ```
 
 Excluding commits significantly improves performance and reduces noise in search results, as commit data tends to be verbose and less semantically meaningful than issues, merge requests, and code files.
@@ -331,28 +368,38 @@ python scripts/create_azure_search_index.py
 
 ### Running the Complete Pipeline
 
-To run the complete pipeline (extract, process, embed, and index) in one go:
+To run the complete pipeline (extract, process, embed, and index) in one go, use the `initialize_pipeline.py` script:
 
 ```bash
-# For a specific project
-python main.py --all --project-id your_project_id
+# For all steps (extraction, processing, embedding, and indexing)
+python scripts/initialize_pipeline.py --all
 
-# For multiple projects
-python main.py --all --project-id "project_id_1,project_id_2"
+# For specific projects
+python scripts/initialize_pipeline.py --all --project-id "project_id_1,project_id_2"
 
 # For all projects in a group
-python main.py --all --group-projects-id "group_id_1,group_id_2"
+python scripts/initialize_pipeline.py --all --group-projects-id "group_id_1,group_id_2"
 
 # For epics in a group
-python main.py --all --group-id "group_id_1,group_id_2"
+python scripts/initialize_pipeline.py --all --group-id "group_id_1,group_id_2"
+
+# To skip commit extraction (recommended for better performance)
+python scripts/initialize_pipeline.py --all --no-commits
 ```
+
+The script will:
+1. Extract data from GitLab (issues, merge requests, epics, and code files)
+2. Process and chunk the extracted data
+3. Generate embeddings for the chunks using Azure OpenAI
+4. Index the chunks in Azure Cognitive Search
+5. Standardize source URLs in both processed data blobs and search index documents
 
 ### Running Only Data Extraction and Ingestion (No RAG)
 
 If you only need to extract and ingest data without setting up the RAG components:
 
 ```bash
-python main.py --extract --process --index --project-id your_project_id
+python scripts/initialize_pipeline.py --extract --process --index --project-id your_project_id
 ```
 
 ### API Server
@@ -378,7 +425,47 @@ curl -X POST "http://localhost:8000/query" \
 
 ## Agentic RAG System
 
-The agentic RAG system enhances the standard RAG capabilities by adding the ability to take actions based on user queries. It can retrieve information from Azure Search and execute actions like listing GitLab issues, epics, and more.
+The agentic RAG system enhances the standard RAG capabilities by adding the ability to take actions based on user queries. It can retrieve information from Azure Search and execute actions like listing GitLab issues, creating issues, and more.
+
+### Semantic Kernel 1.32.0 Integration
+
+The system has been fully updated to work with Semantic Kernel 1.32.0, including:
+
+- Using `KernelArguments` for passing function arguments
+- Direct function registration with `kernel.add_function(plugin_name, function)`
+- Updated function invocation with the new `invoke` method
+- Robust JSON parsing with code fence marker handling
+- Detailed logging of function result types and values
+
+### Enhanced Issue Creation
+
+The issue creation workflow has been improved to:
+
+- Require detailed project and epic information before creating issues
+- Explicitly check for missing required fields and prompt for them
+- Handle both regular issues and user stories with the same validation requirements
+- Provide clear, specific error messages when required information is missing
+- Include source citations in knowledge discovery responses
+
+### Enhanced Query Intent Recognition and Search Filtering
+
+The system now features improved query understanding and more relevant search results:
+
+#### Content Type Detection
+- Detects both user intent (technical question, issue creation, etc.) and content type (code, issue, merge request, epic)
+- Uses an enhanced prompt that outputs a structured JSON with intent, content type, confidence, and explanation
+- Supports multiple content types: CODE, ISSUE, MERGE_REQUEST, EPIC, and GENERAL
+
+#### Intelligent Search Filtering
+- Filters Azure Search results based on the detected content type
+- Maps content types to corresponding `source_type` field values in the search index
+- Supports multi-type filtering for general queries (e.g., searching across both code and issues)
+- Improves search relevance by focusing on the most appropriate document types
+
+#### Enhanced Search Results
+- Includes both source name and source type in search results for better citation clarity
+- Formats results with clear attribution to help users understand the source of information
+- Prioritizes the most relevant document types based on the query context
 
 ### Configuring the Agent
 
@@ -442,22 +529,17 @@ The application can be deployed as Azure Functions for more scalable and event-d
 
 For a demonstration setup, follow these steps:
 
-1. Extract data from sample projects:
+1. Initialize the complete pipeline (extract, process, embed, and index):
    ```bash
-   python tools/run_optimized_pipeline.py --extract --project-id "69940200,69861496"
+   python scripts/initialize_pipeline.py --all --project-id "69940200,69861496" --no-commits
    ```
 
-2. Process and index the data:
-   ```bash
-   python tools/run_optimized_pipeline.py --process --index
-   ```
-
-3. Start the agentic RAG service:
+2. Start the agentic RAG service:
    ```bash
    python tools/run_rag_service.py
    ```
 
-4. Open http://localhost:8001 in your browser to interact with the system.
+3. Open http://localhost:8001 in your browser to interact with the system.
 
 ## Troubleshooting
 
@@ -476,6 +558,31 @@ Check the logs for detailed error messages:
 # Set more verbose logging
 export PYTHONVERBOSE=1
 ```
+
+
+## Project Overview
+The DLS-404 GitLab RAG application is a sophisticated system that combines:
+
+- Retrieval-Augmented Generation (RAG) for GitLab data
+- Agentic workflows powered by Semantic Kernel
+- Knowledge Assistant for interactive querying and issue management
+
+The system has several key components:
+
+- KnowledgeAssistant: Core class that manages agentic workflows
+- AgentRAG: Handles retrieval-augmented generation
+- GitLabMCPAgent: Provides secure GitLab operations through a Managed Content Provider
+- Azure OpenAI integration for embeddings and completions
+- Azure Search for vector storage and retrieval
+
+## Demo
+
+To test the content type search functionality:
+
+```bash
+python scripts/test_content_type_search.py
+```
+
 
 ## License
 

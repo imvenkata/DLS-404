@@ -122,13 +122,14 @@ class CodeExtractor(GitLabExtractor):
                     except Exception as e:
                         logger.error(f"Failed to get file content for {file_path}: {str(e)}")
                         content = ""
-                        
+                    
+                    try:
                         file_data = {
                             'path': file_path,
                             'name': file_path.split('/')[-1],
                             'content': content,
                             'size': item.get('size', 0),
-                            'ref': ref
+                            'ref': used_branch
                         }
                         
                         # Extract metadata
@@ -137,7 +138,7 @@ class CodeExtractor(GitLabExtractor):
                         # Add file-specific metadata
                         metadata['path'] = file_path
                         metadata['name'] = file_path.split('/')[-1]
-                        metadata['ref'] = ref
+                        metadata['ref'] = used_branch
                         
                         # Determine language from file extension
                         extension = file_path.split('.')[-1].lower() if '.' in file_path else ''
@@ -156,11 +157,19 @@ class CodeExtractor(GitLabExtractor):
                         }
                         metadata['language'] = language_map.get(extension, 'unknown')
                         
+                        # Add source_url for citation purposes
+                        if project_id:
+                            # Construct GitLab URL for the file
+                            # Format: https://gitlab.com/[group]/[project]/-/blob/[branch]/[file_path]
+                            metadata['source_url'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/{used_branch}/{file_path}"
+                            # Also add web_url for backward compatibility
+                            metadata['web_url'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/{used_branch}/{file_path}"
+                        
                         # Add metadata to file data
                         file_data['metadata'] = metadata
                         files.append(file_data)
                     except Exception as e:
-                        logger.warning(f"Could not get content for file {file_path}: {str(e)}")
+                        logger.warning(f"Could not process metadata for file {file_path}: {str(e)}")
             
             logger.info(f"Extracted {len(files)} repository files from project {project_id}")
             return files

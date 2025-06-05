@@ -1,12 +1,12 @@
 """
 Processors package for text and code chunking and embedding generation.
 """
-from .text_chunker import TextChunker
-from .code_chunker import CodeChunker
+from .improved_text_chunker import ImprovedTextChunker
+from .improved_code_chunker import ImprovedCodeChunker
 from .embeddings_generator import EmbeddingsGenerator
 
 __all__ = [
-    'TextChunker',
-    'CodeChunker',
+    'ImprovedTextChunker',
+    'ImprovedCodeChunker',
     'EmbeddingsGenerator'
 ]
