@@ -158,6 +158,14 @@ class IssuesExtractor(GitLabExtractor):
                     'downvotes': issue_data.get('downvotes', None)
                 }
                 
+                # Add source_url for citation purposes
+                if 'web_url' in issue_data:
+                    metadata['source_url'] = issue_data['web_url']
+                elif 'gitlab_url' not in metadata and 'iid' in issue_data and project_id:
+                    # Construct GitLab URL if not available
+                    metadata['source_url'] = f"https://gitlab.com/dls-404/DLS-404/-/issues/{issue_data['iid']}"
+                    metadata['gitlab_url'] = metadata['source_url']
+                
                 # Add metadata to issue data
                 issue_data['metadata'] = metadata
                 issues.append(issue_data)

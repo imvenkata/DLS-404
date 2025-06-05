@@ -64,6 +64,7 @@ class AzureSearchClient:
         query: str,
         embedding: Optional[List[float]] = None,
         filters: Optional[Dict[str, Any]] = None,
+        source_types: Optional[List[str]] = None,
         top: int = 5,
         use_vector_search: bool = True
     ) -> List[Dict[str, Any]]:
@@ -83,6 +84,22 @@ class AzureSearchClient:
         if not self.search_client:
             logger.error("Search client not initialized")
             return []
+        
+        # Process source_types into filters if provided
+        if source_types and not filters:
+            filters = {}
+        
+        if source_types:
+            # If we have a list of source types, create a filter for them
+            if len(source_types) == 1:
+                # Single source type
+                filters["source_type"] = source_types[0]
+            else:
+                # Multiple source types - we'll handle this in the filter string creation
+                # We'll set a placeholder that will be processed in the search methods
+                filters["_source_types"] = source_types
+            
+            logger.info(f"Filtering by source types: {source_types}")
         
         # Determine search type
         if embedding is not None and use_vector_search:
@@ -278,7 +295,7 @@ class AzureSearchClient:
                     # Required fields
                     'id': sanitized_id,
                     'original_content': chunk.get('content', ''),
-                    'content_vector': chunk.get('embedding', []),
+                    'content_vector': chunk.get('content_vector', chunk.get('embedding', [])),
                 }
                 
                 # Add metadata fields if available
@@ -314,7 +331,10 @@ class AzureSearchClient:
                     if 'project_id' in metadata:
                         doc['project_id_gitlab'] = str(metadata['project_id'])
                     
-                    if 'source_url' in metadata:
+                    # Handle source URI - prioritize source_uri over source_url
+                    if 'source_uri' in metadata:
+                        doc['source_uri'] = str(metadata['source_uri'])
+                    elif 'source_url' in metadata:
                         doc['source_uri'] = str(metadata['source_url'])
                     
                     if 'content_summary' in metadata and metadata['content_summary']:

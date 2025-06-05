@@ -2,26 +2,39 @@
 Script for initializing the RAG pipeline with GitLab data.
 """
 import os
-import logging
-import argparse
+import sys
 import json
-from typing import List, Union, Dict, Any
+import glob
+import uuid
+import logging
+import datetime
+import argparse
+import subprocess
+from typing import Dict, List, Any, Optional, Union
 from dotenv import load_dotenv
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from extractors.enhanced_issues_extractor import EnhancedIssuesExtractor
 from extractors.merge_requests_extractor import MergeRequestsExtractor
-from extractors.commits_extractor import CommitsExtractor
 from extractors.code_extractor import CodeExtractor
-from extractors.gitlab_extractor import GitLabExtractor
-# Import original chunkers
-from processors.text_chunker import TextChunker
-from processors.code_chunker import CodeChunker
-# Import improved chunkers
+from extractors.commits_extractor import CommitsExtractor
+from processors.embeddings_generator import EmbeddingsGenerator
 from processors.improved_text_chunker import ImprovedTextChunker
 from processors.improved_code_chunker import ImprovedCodeChunker
-from processors.embeddings_generator import EmbeddingsGenerator
 from storage.blob_storage import BlobStorage
 from search.azure_search import AzureSearchClient
-from config.config import GITLAB_PROJECT_ID, GITLAB_GROUP_ID, AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME
+from search.enhanced_azure_search import EnhancedAzureSearchClient
+from config.config import (
+    AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY,
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT, AZURE_OPENAI_EMBEDDING_MODEL,
+    AZURE_OPENAI_EMBEDDING_DIMENSION,
+    AZURE_STORAGE_CONNECTION_STRING, AZURE_STORAGE_CONTAINER_NAME,
+    AZURE_STORAGE_PROCESSED_CONTAINER_NAME,
+    AZURE_SEARCH_ENDPOINT, AZURE_SEARCH_KEY, AZURE_SEARCH_INDEX_NAME,
+    GITLAB_URL, GITLAB_TOKEN, GITLAB_PROJECT_ID, GITLAB_GROUP_ID
+)
 
 # Load environment variables
 load_dotenv()
@@ -35,7 +48,7 @@ def extract_data(project_ids: Union[str, List[str]],
                 group_projects_ids: Union[str, List[str]] = None,
                 extract_issues: bool = True, 
                 extract_merge_requests: bool = True, 
-                extract_commits: bool = True, 
+                extract_commits: bool = False, # Set to False by default to exclude commits
                 extract_code: bool = True, 
                 extract_epics: bool = True):
     """
@@ -216,6 +229,189 @@ def extract_data(project_ids: Union[str, List[str]],
     
     return extracted_data
 
+def standardize_source_uri(metadata: Dict[str, Any], chunk_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Standardize source_uri in metadata across all data types and ensure other metadata fields are populated.
+    
+    Args:
+        metadata: Metadata dictionary
+        chunk_id: Optional chunk ID to extract information from
+        
+    Returns:
+        Updated metadata dictionary with standardized source_uri and other fields
+    """
+    # Set source_type if missing
+    if 'entity_type' in metadata and not metadata.get('source_type'):
+        metadata['source_type'] = metadata['entity_type']
+    
+    # If source_uri already exists and looks valid, keep it
+    if 'source_uri' in metadata and metadata['source_uri'] and 'gitlab.com' in metadata['source_uri']:
+        return metadata
+    
+    # If web_url exists, use it as source_uri
+    if 'web_url' in metadata and metadata['web_url']:
+        metadata['source_uri'] = metadata['web_url']
+        return metadata
+    
+    # If gitlab_url exists, use it as source_uri
+    if 'gitlab_url' in metadata and metadata['gitlab_url']:
+        metadata['source_uri'] = metadata['gitlab_url']
+        return metadata
+    
+    # Try to extract information from chunk_id
+    if chunk_id:
+        # Extract file path from code chunk IDs
+        if 'processed_code' in chunk_id:
+            # Format: processed_code_PROJECT_ID_PATH_chunk_INDEX
+            # Example: processed_code_69861496_api_main_py_chunk_0
+            parts = chunk_id.split('_')
+            if len(parts) >= 4:
+                # Extract project ID
+                project_id = parts[2]
+                metadata['project_id_gitlab'] = project_id
+                
+                # Extract file path
+                file_parts = []
+                for i in range(3, len(parts)):
+                    if parts[i] == 'chunk':
+                        break
+                    file_parts.append(parts[i])
+                
+                if file_parts:
+                    file_path = '/'.join(file_parts).replace('_', '/')
+                    # Fix common file extensions
+                    if file_path.endswith('py'):
+                        file_path = file_path[:-2] + '.py'
+                    elif file_path.endswith('js'):
+                        file_path = file_path[:-2] + '.js'
+                    elif file_path.endswith('md'):
+                        file_path = file_path[:-2] + '.md'
+                    elif file_path.endswith('json'):
+                        file_path = file_path[:-4] + '.json'
+                    
+                    metadata['file_path'] = file_path
+                    metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/main/{file_path}"
+                    metadata['source_type'] = 'code'
+                    
+                    # Set title to file path if missing
+                    if not metadata.get('title'):
+                        metadata['title'] = file_path
+        
+        # Extract issue information
+        elif 'processed_issue' in chunk_id:
+            # Format: processed_issue_PROJECT_ID_ISSUE_ID_chunk_INDEX
+            # Example: processed_issue_69861496_123_chunk_0
+            parts = chunk_id.split('_')
+            if len(parts) >= 5:
+                project_id = parts[2]
+                issue_id = parts[3]
+                metadata['project_id_gitlab'] = project_id
+                metadata['item_id_gitlab'] = issue_id
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/issues/{issue_id}"
+                metadata['source_type'] = 'issue'
+        
+        # Extract merge request information
+        elif 'processed_mr' in chunk_id or 'processed_merge_request' in chunk_id:
+            # Format: processed_mr_PROJECT_ID_MR_ID_chunk_INDEX
+            parts = chunk_id.split('_')
+            if len(parts) >= 5:
+                project_id = parts[2]
+                mr_id = parts[3]
+                metadata['project_id_gitlab'] = project_id
+                metadata['item_id_gitlab'] = mr_id
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/merge_requests/{mr_id}"
+                metadata['source_type'] = 'merge_request'
+        
+        # Extract epic information
+        elif 'processed_epic' in chunk_id:
+            # Format: processed_epic_GROUP_ID_EPIC_ID_chunk_INDEX
+            parts = chunk_id.split('_')
+            if len(parts) >= 5:
+                group_id = parts[2]
+                epic_id = parts[3]
+                metadata['epic_id_gitlab'] = epic_id
+                metadata['source_uri'] = f"https://gitlab.com/groups/dls-404/-/epics/{epic_id}"
+                metadata['source_type'] = 'epic'
+    
+    # If we still don't have a source_uri, try to construct it from metadata
+    if not metadata.get('source_uri'):
+        # Construct source_uri based on entity type and ID if possible
+        entity_type = metadata.get('entity_type') or metadata.get('source_type')
+        project_id = metadata.get('project_id') or metadata.get('project_id_gitlab', '69861496')  # Default to DLS-404 project ID
+        
+        if entity_type == 'issue':
+            item_id = metadata.get('id') or metadata.get('iid') or metadata.get('item_id_gitlab')
+            if item_id:
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/issues/{item_id}"
+                metadata['source_type'] = 'issue'
+        
+        elif entity_type == 'merge_request' or entity_type == 'mr':
+            item_id = metadata.get('id') or metadata.get('iid') or metadata.get('item_id_gitlab')
+            if item_id:
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/merge_requests/{item_id}"
+                metadata['source_type'] = 'merge_request'
+        
+        elif entity_type == 'epic':
+            item_id = metadata.get('id') or metadata.get('iid') or metadata.get('epic_id_gitlab')
+            if item_id:
+                metadata['source_uri'] = f"https://gitlab.com/groups/dls-404/-/epics/{item_id}"
+                metadata['source_type'] = 'epic'
+        
+        elif entity_type == 'commit':
+            commit_id = metadata.get('commit_id') or metadata.get('id')
+            if commit_id:
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/commit/{commit_id}"
+                metadata['source_type'] = 'commit'
+        
+        elif entity_type == 'code' or entity_type == 'file':
+            file_path = metadata.get('file_path') or metadata.get('path') or metadata.get('title')
+            branch = metadata.get('branch') or metadata.get('ref') or metadata.get('git_ref', 'main')
+            if file_path:
+                # Clean up file path if it contains class or function names
+                if file_path.startswith('class ') or file_path.startswith('function '):
+                    # Extract just the filename from the title if possible
+                    if metadata.get('file_name'):
+                        file_path = metadata.get('file_name')
+                    elif chunk_id and 'processed_code' in chunk_id:
+                        # Try to extract from chunk_id
+                        parts = chunk_id.split('_')
+                        if len(parts) >= 4:
+                            file_parts = []
+                            for i in range(3, len(parts)):
+                                if parts[i] == 'chunk':
+                                    break
+                                file_parts.append(parts[i])
+                            
+                            if file_parts:
+                                file_path = '/'.join(file_parts).replace('_', '/')
+                                # Fix common file extensions
+                                if file_path.endswith('py'):
+                                    file_path = file_path[:-2] + '.py'
+                                elif file_path.endswith('js'):
+                                    file_path = file_path[:-2] + '.js'
+                                elif file_path.endswith('md'):
+                                    file_path = file_path[:-2] + '.md'
+                                elif file_path.endswith('json'):
+                                    file_path = file_path[:-4] + '.json'
+                
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/{branch}/{file_path}"
+                metadata['source_type'] = 'code'
+                metadata['file_path'] = file_path
+    
+    # Extract information from content_type_detail if available and still no source_uri
+    content_type_detail = metadata.get('content_type_detail')
+    if not metadata.get('source_uri') and content_type_detail:
+        # Try to extract file path from content_type_detail
+        if 'file:' in content_type_detail.lower():
+            file_match = re.search(r'file:\s*([^\n]+)', content_type_detail, re.IGNORECASE)
+            if file_match:
+                file_path = file_match.group(1).strip()
+                metadata['source_uri'] = f"https://gitlab.com/dls-404/DLS-404/-/blob/main/{file_path}"
+                metadata['source_type'] = 'code'
+                metadata['file_path'] = file_path
+    
+    return metadata
+
 def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[str, List[str]] = None):
     """
     Process, chunk, embed, and upload data for each source item individually.
@@ -267,7 +463,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
             # No need to copy item_chunks if process_chunks is robust or if we don't reuse item_chunks raw.
             chunks_with_embeddings = embeddings_generator.process_chunks(item_chunks)
             
-            if not chunks_with_embeddings or not any('embedding' in chunk for chunk in chunks_with_embeddings):
+            if not chunks_with_embeddings or not any('content_vector' in chunk for chunk in chunks_with_embeddings):
                 logger.warning(f"Embedding generation failed or returned no embeddings for {item_type_log} '{item_identifier_log}'. Raw chunks not saved for this item.")
                 return [] # Or save raw chunks to base_blob_name_no_ext + "_raw_chunks.json"
 
@@ -306,6 +502,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                     if 'description' in issue and issue['description']:
                         metadata = issue['metadata'].copy()
                         metadata['content_type'] = 'description'
+                        metadata = standardize_source_uri(metadata)
                         current_item_chunks.extend(text_chunker.chunk_text(issue['description'], metadata))
                     
                     if 'notes' in issue and issue['notes']:
@@ -314,6 +511,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                                 metadata = issue['metadata'].copy() # Start from base issue metadata
                                 metadata['content_type'] = 'comment'
                                 metadata['comment_id'] = note.get('id', 'unknown_comment')
+                                metadata = standardize_source_uri(metadata)
                                 if 'author' in note and isinstance(note['author'], dict):
                                     metadata['author_username'] = note['author'].get('username', 'unknown')
                                 current_item_chunks.extend(text_chunker.chunk_text(note['body'], metadata))
@@ -338,6 +536,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                     if 'description' in mr and mr['description']:
                         metadata = mr['metadata'].copy()
                         metadata['content_type'] = 'description'
+                        metadata = standardize_source_uri(metadata)
                         current_item_chunks.extend(text_chunker.chunk_text(mr['description'], metadata))
                     if 'notes' in mr and mr['notes']:
                         for note in mr['notes']:
@@ -345,6 +544,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                                 metadata = mr['metadata'].copy()
                                 metadata['content_type'] = 'comment'
                                 metadata['comment_id'] = note.get('id', 'unknown_comment')
+                                metadata = standardize_source_uri(metadata)
                                 if 'author' in note and isinstance(note['author'], dict):
                                     metadata['author_username'] = note['author'].get('username', 'unknown')
                                 current_item_chunks.extend(text_chunker.chunk_text(note['body'], metadata))
@@ -369,6 +569,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                     if 'message' in commit and commit['message']:
                         metadata = commit['metadata'].copy()
                         metadata['content_type'] = 'message'
+                        metadata = standardize_source_uri(metadata)
                         current_item_chunks.extend(text_chunker.chunk_text(commit['message'], metadata))
                     if 'diff' in commit and commit['diff']:
                         diff_text = ""
@@ -378,6 +579,7 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                         if diff_text:
                             metadata = commit['metadata'].copy() # Base commit metadata
                             metadata['content_type'] = 'diff'
+                            metadata = standardize_source_uri(metadata)
                             current_item_chunks.extend(text_chunker.chunk_text(diff_text, metadata))
                     
                     if current_item_chunks:
@@ -474,25 +676,49 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
             
     return all_successfully_embedded_chunks_master
 
-def index_chunks(project_ids: Union[str, List[str]] = None):
+def index_chunks(project_ids=None, overwrite=False):
     """
     Index chunks in Azure AI Search.
     
     Args:
-        project_ids: GitLab project IDs (string or list) - used only for logging
+        project_ids: GitLab project IDs (string or list)
+        overwrite: Whether to overwrite existing data in the index
         
     Returns:
-        True if successful, False otherwise
+        bool: True if indexing was successful, False otherwise
     """
-    # Initialize storage
+    logger.info("Indexing chunks in Azure AI Search")
+    
+    # Initialize storage and search clients
+    # Re-load environment to ensure we have the latest index name
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    current_index_name = os.getenv("AZURE_SEARCH_INDEX_NAME", AZURE_SEARCH_INDEX_NAME)
+    logger.info(f"Using Azure Search index: {current_index_name}")
+    
+    # Initialize storage and search clients
     blob_storage = BlobStorage()
     
-    # Initialize search client
-    search_client = AzureSearchClient(
+    # Initialize Azure Search client
+    search_client = EnhancedAzureSearchClient(
         endpoint=AZURE_SEARCH_ENDPOINT,
         api_key=AZURE_SEARCH_KEY,
-        index_name=AZURE_SEARCH_INDEX_NAME
+        index_name=current_index_name
     )
+    
+    # Initialize embeddings generator to use prepare_for_azure_search method
+    embeddings_generator = EmbeddingsGenerator()
+    
+    # If overwrite is True, delete existing documents first
+    if overwrite:
+        logger.info("Overwrite flag is set, deleting existing documents from the index")
+        try:
+            # Use a wildcard query to match all documents
+            search_client.delete_documents("*")
+            logger.info("Successfully deleted existing documents from the index")
+        except Exception as e:
+            logger.error(f"Error deleting documents: {str(e)}")
+            # Continue with indexing even if deletion fails
     
     # Convert string IDs to lists if needed
     if isinstance(project_ids, str):
@@ -515,7 +741,112 @@ def index_chunks(project_ids: Union[str, List[str]] = None):
         chunks = blob_storage.download_processed_data(blob_name)
         if chunks:
             logger.info(f"Loaded {len(chunks)} chunks from {blob_name}")
-            all_chunks.extend(chunks)
+            
+            # Validate and fix chunks before adding them
+            valid_chunks = []
+            for i, chunk in enumerate(chunks):
+                # Debug log to check chunk structure
+                logger.debug(f"Checking chunk {i} from {blob_name}: {list(chunk.keys())}")
+                
+                # Create a normalized chunk with all required fields
+                normalized_chunk = {}
+                
+                # Set ID
+                if chunk.get('id'):
+                    normalized_chunk['id'] = str(chunk['id'])
+                elif 'search_document' in chunk and chunk['search_document'].get('id'):
+                    normalized_chunk['id'] = str(chunk['search_document']['id'])
+                else:
+                    normalized_chunk['id'] = f"chunk_{blob_name}_{i}"
+                
+                # Set content
+                if chunk.get('content'):
+                    normalized_chunk['content'] = chunk['content']
+                elif 'search_document' in chunk and chunk['search_document'].get('content'):
+                    normalized_chunk['content'] = chunk['search_document']['content']
+                elif 'search_document' in chunk and chunk['search_document'].get('content_to_embed'):
+                    normalized_chunk['content'] = chunk['search_document']['content_to_embed']
+                else:
+                    logger.warning(f"Chunk {normalized_chunk['id']} missing content, skipping")
+                    continue
+                
+                # Set content_vector - check all possible locations
+                embedding_found = False
+                
+                # First check for content_vector in the chunk
+                if chunk.get('content_vector') and isinstance(chunk['content_vector'], list):
+                    normalized_chunk['content_vector'] = chunk['content_vector']
+                    embedding_found = True
+                    logger.debug(f"Found content_vector at chunk['content_vector'] with {len(chunk['content_vector'])} dimensions")
+                
+                # Then check in search_document
+                elif 'search_document' in chunk:
+                    if chunk['search_document'].get('content_vector') and isinstance(chunk['search_document']['content_vector'], list):
+                        normalized_chunk['content_vector'] = chunk['search_document']['content_vector']
+                        embedding_found = True
+                        logger.debug(f"Found content_vector at chunk['search_document']['content_vector'] with {len(chunk['search_document']['content_vector'])} dimensions")
+                    elif chunk['search_document'].get('content_vector') and not isinstance(chunk['search_document']['content_vector'], list):
+                        logger.debug(f"Found 'content_vector' key in search_document but it's not a valid list: {type(chunk['search_document']['content_vector'])}")
+                    # Fall back to old embedding field if content_vector not found
+                    elif chunk['search_document'].get('embedding') and isinstance(chunk['search_document']['embedding'], list):
+                        normalized_chunk['content_vector'] = chunk['search_document']['embedding']
+                        embedding_found = True
+                        logger.debug(f"Found old embedding field at chunk['search_document']['embedding'] with {len(chunk['search_document']['embedding'])} dimensions")
+                
+                # If no embedding found, try to generate one on-the-fly
+                if not embedding_found and normalized_chunk.get('content'):
+                    try:
+                        logger.info(f"No content_vector found for chunk {normalized_chunk['id']}, generating one on-the-fly")
+                        new_embedding = embeddings_generator.generate_embedding(normalized_chunk['content'])
+                        normalized_chunk['content_vector'] = new_embedding
+                        embedding_found = True
+                        logger.info(f"Successfully generated embedding with {len(new_embedding)} dimensions")
+                    except Exception as e:
+                        logger.error(f"Failed to generate embedding on-the-fly: {str(e)}")
+                
+                if not embedding_found:
+                    logger.warning(f"Chunk {normalized_chunk['id']} missing valid embedding, skipping")
+                    continue
+                
+                # Set metadata
+                normalized_chunk['metadata'] = {}
+                
+                # Copy metadata from chunk
+                if chunk.get('metadata'):
+                    normalized_chunk['metadata'].update(chunk['metadata'])
+                
+                # Copy metadata from search_document
+                if 'search_document' in chunk:
+                    for key, value in chunk['search_document'].items():
+                        if key not in ['id', 'content', 'content_to_embed', 'embedding', 'content_vector']:
+                            normalized_chunk['metadata'][key] = value
+                
+                # Set source_type
+                if 'search_document' in chunk and chunk['search_document'].get('entity_type'):
+                    normalized_chunk['source_type'] = chunk['search_document']['entity_type']
+                elif 'search_document' in chunk and chunk['search_document'].get('source_type'):
+                    normalized_chunk['source_type'] = chunk['search_document']['source_type']
+                elif chunk.get('metadata', {}).get('entity_type'):
+                    normalized_chunk['source_type'] = chunk['metadata']['entity_type']
+                elif chunk.get('metadata', {}).get('source_type'):
+                    normalized_chunk['source_type'] = chunk['metadata']['source_type']
+                else:
+                    if 'code' in blob_name:
+                        normalized_chunk['source_type'] = 'code'
+                    elif 'issue' in blob_name:
+                        normalized_chunk['source_type'] = 'issue'
+                    elif 'mr' in blob_name or 'merge_request' in blob_name:
+                        normalized_chunk['source_type'] = 'merge_request'
+                    else:
+                        normalized_chunk['source_type'] = 'code'  # Default to code if unknown
+                
+                # Log embedding dimensions for debugging
+                logger.debug(f"Normalized chunk {normalized_chunk['id']} has embedding with {len(normalized_chunk['content_vector'])} dimensions")
+                
+                valid_chunks.append(normalized_chunk)
+            
+            logger.info(f"Found {len(valid_chunks)} valid chunks with content and embeddings in {blob_name}")
+            all_chunks.extend(valid_chunks)
         else:
             logger.warning(f"No chunks found in {blob_name}")
     
@@ -523,10 +854,251 @@ def index_chunks(project_ids: Union[str, List[str]] = None):
         logger.error("No chunks with embeddings found in any processed blob")
         return False
     
-    logger.info(f"Indexing {len(all_chunks)} chunks in Azure AI Search")
+    # Prepare search documents for our new standardized schema
+    logger.info(f"Preparing {len(all_chunks)} chunks for Azure Search indexing")
     
-    # Index chunks
-    success = search_client.index_chunks(all_chunks)
+    search_documents = []
+    for chunk in all_chunks:
+        # Create a new document that matches our optimized schema
+        doc = {}
+        
+        # Extract metadata first from the chunk
+        metadata = chunk.get('metadata', {})
+        
+        # Debug the metadata content
+        logger.debug(f"Processing chunk with metadata keys: {metadata.keys() if metadata else 'None'}")
+        if 'search_document' in chunk:
+            logger.debug(f"Chunk contains search_document with keys: {chunk['search_document'].keys()}")
+            
+        # Core fields - required for all entities
+        doc['id'] = chunk.get('id') or metadata.get('id') or f"document_{uuid.uuid4()}"
+        
+        # Extract title from various possible locations
+        doc['title'] = metadata.get('title') or \
+                       (chunk.get('search_document', {}) or {}).get('title') or \
+                       ''
+        
+        doc['content'] = chunk.get('content', '')
+        
+        # Always use content_vector for embeddings
+        doc['content_vector'] = chunk.get('content_vector')
+        
+        # Common metadata fields - look in multiple places with verbose debugging
+        # Find the entity_type in all possible locations
+        entity_from_metadata = metadata.get('entity_type')
+        source_from_metadata = metadata.get('source_type')
+        source_from_chunk = chunk.get('source_type')
+        entity_from_search_doc = None
+        if chunk.get('search_document'):
+            entity_from_search_doc = chunk['search_document'].get('entity_type')
+        
+        # Log all possible sources
+        logger.info(f"Entity type sources for chunk {chunk.get('id', 'unknown')}:")
+        logger.info(f"  - From metadata.entity_type: {entity_from_metadata}")
+        logger.info(f"  - From metadata.source_type: {source_from_metadata}")
+        logger.info(f"  - From chunk.source_type: {source_from_chunk}")
+        logger.info(f"  - From search_document.entity_type: {entity_from_search_doc}")
+        
+        # Choose the first available source in priority order
+        source_type = entity_from_metadata or source_from_metadata or source_from_chunk or entity_from_search_doc or 'unknown'
+        
+        # Entity type standardization with improved fallback logic
+        # First try direct assignment from metadata
+        if entity_from_metadata:
+            doc['entity_type'] = entity_from_metadata
+            logger.info(f"Using entity_type from metadata: {doc['entity_type']}")
+        
+        # Next try source_type normalization
+        elif source_type in ['issue', 'issues']:
+            doc['entity_type'] = 'issue'
+            logger.info(f"Normalized source_type '{source_type}' to 'issue'")
+        elif source_type in ['merge_request', 'mr', 'mrs']:
+            doc['entity_type'] = 'merge_request'
+            logger.info(f"Normalized source_type '{source_type}' to 'merge_request'")
+        elif source_type in ['epic', 'epics']:
+            doc['entity_type'] = 'epic'
+            logger.info(f"Normalized source_type '{source_type}' to 'epic'")
+        elif source_type in ['code', 'source_code']:
+            doc['entity_type'] = 'code'
+            logger.info(f"Normalized source_type '{source_type}' to 'code'")
+        
+        # Use ID-based detection
+        elif doc['id'].startswith('code_'):
+            doc['entity_type'] = 'code'
+            logger.info(f"Detected code entity based on ID pattern: {doc['id']}")
+        
+        # Check file path (usually indicates code)
+        elif metadata.get('file_path') or metadata.get('path'):
+            doc['entity_type'] = 'code'
+            logger.info(f"Detected code entity based on file_path presence")
+        
+        # Last fallback
+        else:
+            # Make sure we don't have 'unknown' as entity_type since filters won't work with it
+            if source_type == 'unknown':
+                # Try to determine entity type based on available fields
+                if metadata.get('merge_status') or metadata.get('source_branch'):
+                    doc['entity_type'] = 'merge_request'
+                    logger.info("Determined entity_type as 'merge_request' based on merge-specific fields")
+                elif metadata.get('parent_epic_id') or metadata.get('group_id'):
+                    doc['entity_type'] = 'epic'
+                    logger.info("Determined entity_type as 'epic' based on epic-specific fields")
+                elif metadata.get('milestone') or metadata.get('state') == 'closed' or metadata.get('state') == 'open':
+                    doc['entity_type'] = 'issue'
+                    logger.info("Determined entity_type as 'issue' based on issue-specific fields")
+                else:
+                    # Default to code as final fallback
+                    doc['entity_type'] = 'code'
+                    logger.info(f"Using default entity_type 'code' as final fallback")
+            else:
+                doc['entity_type'] = source_type
+                logger.info(f"Using source_type as entity_type: {doc['entity_type']}")
+        
+        # Extract project_id and other metadata from metadata object
+        doc['project_id'] = metadata.get('project_id', metadata.get('project_identifier', ''))
+        doc['gitlab_id'] = metadata.get('id') or metadata.get('gitlab_id') or metadata.get('item_internal_id', '')
+        doc['web_url'] = metadata.get('web_url') or metadata.get('gitlab_url') or metadata.get('source_url', '')
+        
+        # Time fields
+        current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        doc['created_at'] = metadata.get('created_at') or current_time
+        doc['updated_at'] = metadata.get('updated_at') or current_time
+        
+        # Author fields
+        doc['author_username'] = metadata.get('author_username', '')
+        doc['author_name'] = metadata.get('author_name', metadata.get('author_id', ''))
+        
+        # Labels - get from either labels or tags_or_labels
+        doc['labels'] = metadata.get('labels') or metadata.get('tags_or_labels', [])
+        
+        # Chunking metadata
+        doc['chunk_id'] = chunk.get('chunk_id') or metadata.get('chunk_id', '')
+        doc['chunk_index'] = metadata.get('chunk_index') or metadata.get('processing_metadata', {}).get('chunk_index', 0)
+        doc['total_chunks'] = metadata.get('total_chunks') or metadata.get('processing_metadata', {}).get('total_chunks', 1)
+        
+        # Initialize entity-specific fields - pulling actual values when available
+        # Issue/Epic fields
+        doc['description'] = metadata.get('description', '')
+        doc['state'] = metadata.get('state') or metadata.get('status_or_state', '')
+        doc['milestone'] = metadata.get('milestone') or metadata.get('milestone_title', '')
+        doc['assignees'] = metadata.get('assignees') or metadata.get('assignee_names', [])
+        
+        # Merge request fields
+        doc['source_branch'] = metadata.get('source_branch', '')
+        doc['target_branch'] = metadata.get('target_branch', '')
+        doc['merged'] = metadata.get('merged') or metadata.get('state') == 'merged'
+        
+        # Code fields
+        if 'gitlab_code' in metadata and isinstance(metadata['gitlab_code'], dict):
+            gitlab_code = metadata['gitlab_code']
+            doc['file_path'] = gitlab_code.get('file_path', metadata.get('file_path', ''))
+            doc['file_name'] = gitlab_code.get('file_name', metadata.get('file_name', ''))
+            doc['file_extension'] = gitlab_code.get('file_extension', metadata.get('file_extension', ''))
+            doc['language'] = gitlab_code.get('language', metadata.get('language', ''))
+            doc['code_unit_type'] = metadata.get('code_unit_type', '') or metadata.get('entity_subtype', '')
+            doc['code_unit_name'] = metadata.get('code_unit_name', '')
+            doc['start_line'] = gitlab_code.get('start_line', 0) or metadata.get('start_line', 0)
+            doc['end_line'] = gitlab_code.get('end_line', 0) or metadata.get('end_line', 0)
+        else:
+            doc['file_path'] = metadata.get('file_path', metadata.get('path', ''))
+            doc['file_name'] = metadata.get('file_name', metadata.get('name', ''))
+            doc['file_extension'] = metadata.get('file_extension', '')
+            doc['language'] = metadata.get('language', metadata.get('programming_language', ''))
+            doc['code_unit_type'] = metadata.get('code_unit_type', '') or metadata.get('entity_subtype', '')
+            doc['code_unit_name'] = metadata.get('code_unit_name', '')
+            doc['start_line'] = metadata.get('start_line', 0)
+            doc['end_line'] = metadata.get('end_line', 0)
+        
+        # Epic-specific fields
+        doc['group_id'] = metadata.get('group_id', '')
+        doc['parent_epic_id'] = metadata.get('parent_epic_id', '')
+        doc['parent_epic_title'] = metadata.get('parent_epic_title', '')
+        
+        # Engagement metrics
+        if 'gitlab_item' in metadata and isinstance(metadata['gitlab_item'], dict):
+            gitlab_item = metadata['gitlab_item']
+            doc['upvotes'] = gitlab_item.get('upvotes', metadata.get('upvotes', 0))
+            doc['downvotes'] = gitlab_item.get('downvotes', metadata.get('downvotes', 0))
+        else:
+            doc['upvotes'] = metadata.get('upvotes', 0)
+            doc['downvotes'] = metadata.get('downvotes', 0)
+        
+        doc['discussion_count'] = metadata.get('discussion_count', 0)
+        
+        # Related items 
+        doc['related_items'] = metadata.get('linked_items_references') or metadata.get('related_entity_ids', [])
+        
+        # We've already populated all the entity-specific fields above with data from metadata
+        
+        # Store any remaining metadata as custom_metadata (JSON string)
+        custom_metadata = {}
+        for key, value in metadata.items():
+            if key not in [
+                'title', 'project_id', 'gitlab_id', 'web_url', 'created_at', 'updated_at',
+                'author_username', 'author_name', 'labels', 'chunk_id', 'chunk_index', 'total_chunks',
+                'description', 'state', 'milestone', 'assignees', 'source_branch', 'target_branch',
+                'merged', 'file_path', 'file_name', 'file_extension', 'programming_language', 'language',
+                'code_unit_type', 'code_unit_name', 'start_line_number', 'end_line_number', 'start_line', 'end_line',
+                'group_id', 'parent_epic_id', 'parent_epic_title', 'upvotes', 'downvotes',
+                'discussion_count', 'linked_items_references'
+            ] and value is not None:
+                custom_metadata[key] = value
+                
+        # Always set custom_metadata field with at least an empty JSON object
+        try:
+            if custom_metadata:
+                doc['custom_metadata'] = json.dumps(ensure_json_serializable(custom_metadata))
+            else:
+                # If there's a search_document in the chunk, extract any additional metadata from it
+                if 'search_document' in chunk and isinstance(chunk['search_document'], dict):
+                    search_doc_metadata = {k: v for k, v in chunk['search_document'].items() 
+                                          if k not in doc and v is not None and k != 'content_vector'}
+                    if search_doc_metadata:
+                        doc['custom_metadata'] = json.dumps(ensure_json_serializable(search_doc_metadata))
+                    else:
+                        doc['custom_metadata'] = '{}'
+                else:
+                    doc['custom_metadata'] = '{}'
+        except Exception as e:
+            logger.warning(f"Failed to serialize custom metadata: {str(e)}")
+            doc['custom_metadata'] = '{}'
+        
+        search_documents.append(doc)
+    
+    # Log the first few documents for debugging
+    for i, doc in enumerate(search_documents[:3]):
+        logger.info(f"Document {i} keys: {doc.keys()}")
+        logger.info(f"Document {i} entity_type: {doc.get('entity_type', 'missing')}")
+        logger.info(f"Document {i} has content: {'Yes' if doc.get('content') else 'No'}")
+        logger.info(f"Document {i} has content_vector: {'Yes' if doc.get('content_vector') else 'No'}")
+        if doc.get('content_vector'):
+            logger.info(f"Document {i} content_vector dimensions: {len(doc['content_vector'])}")
+        logger.info(f"Document {i} title: {doc.get('title', 'missing')}")
+        
+    # Check if there are documents to index
+    if not search_documents:
+        logger.error("No valid documents prepared for indexing")
+        return False
+    
+    # Verify entity_type is set for all documents
+    entity_types_count = {}
+    for doc in search_documents:
+        entity_type = doc.get('entity_type')
+        if not entity_type:
+            logger.warning(f"Document {doc.get('id')} has no entity_type, setting to 'code' as default")
+            doc['entity_type'] = 'code'
+        
+        # Count entity types for logging
+        entity_types_count[doc['entity_type']] = entity_types_count.get(doc['entity_type'], 0) + 1
+    
+    logger.info(f"Entity type distribution in {len(search_documents)} documents:")
+    for entity_type, count in entity_types_count.items():
+        logger.info(f"  - {entity_type}: {count} documents")
+        
+    logger.info(f"Indexing {len(search_documents)} documents to Azure Search index")
+    
+    # Index prepared search documents
+    success = search_client.index_chunks(search_documents)
     
     return success
 
@@ -567,17 +1139,36 @@ def ensure_json_serializable(data: Any) -> Any:
         return data
 
 def main():
-    """Main function."""
-    parser = argparse.ArgumentParser(description='Initialize RAG pipeline with GitLab data')
-    parser.add_argument('--project-id', default=GITLAB_PROJECT_ID, help='GitLab project ID or comma-separated list of project IDs')
-    parser.add_argument('--group-id', default=GITLAB_GROUP_ID, help='GitLab group ID or comma-separated list of group IDs for epics')
-    parser.add_argument('--group-projects-id', help='GitLab group ID or comma-separated list of group IDs to extract all projects from')
-    parser.add_argument('--extract', action='store_true', help='Extract data from GitLab')
-    parser.add_argument('--process', action='store_true', help='Process and chunk data')
-    parser.add_argument('--embed', action='store_true', help='Generate embeddings for chunks')
-    parser.add_argument('--index', action='store_true', help='Index chunks in Azure AI Search')
-    parser.add_argument('--all', action='store_true', help='Run all steps')
+    """
+    Main function.
+    """
+    # Override Azure endpoints with correct values
+    global AZURE_SEARCH_ENDPOINT, AZURE_OPENAI_ENDPOINT
     
+    # Update Azure Search endpoint if needed
+    if "hackathon-team404-search" in AZURE_SEARCH_ENDPOINT:
+        logger.info(f"Updating Azure Search endpoint from {AZURE_SEARCH_ENDPOINT}")
+        AZURE_SEARCH_ENDPOINT = "https://team404-search.search.windows.net"
+        logger.info(f"Updated Azure Search endpoint to {AZURE_SEARCH_ENDPOINT}")
+    
+    # Update Azure OpenAI endpoint if needed
+    correct_openai_endpoint = "https://hackathon-team404.cognitiveservices.azure.com/"
+    if AZURE_OPENAI_ENDPOINT != correct_openai_endpoint:
+        logger.info(f"Updating Azure OpenAI endpoint from {AZURE_OPENAI_ENDPOINT}")
+        AZURE_OPENAI_ENDPOINT = correct_openai_endpoint
+        logger.info(f"Updated Azure OpenAI endpoint to {AZURE_OPENAI_ENDPOINT}")
+    
+    parser = argparse.ArgumentParser(description="Initialize RAG pipeline with GitLab data")
+    parser.add_argument("--project-id", help="GitLab project ID or comma-separated list of project IDs")
+    parser.add_argument("--group-id", help="GitLab group ID or comma-separated list of group IDs for epics")
+    parser.add_argument("--group-projects-id", help="GitLab group ID or comma-separated list of group IDs to extract all projects from")
+    parser.add_argument("--extract", action="store_true", help="Extract data from GitLab")
+    parser.add_argument("--process", action="store_true", help="Process and chunk data")
+    parser.add_argument("--embed", action="store_true", help="Generate embeddings for chunks")
+    parser.add_argument("--index", action="store_true", help="Index chunks in Azure AI Search")
+    parser.add_argument("--standardize", action="store_true", help="Standardize source URLs in processed data and search index")
+    parser.add_argument("--all", action="store_true", help="Run all steps")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing data")
     args = parser.parse_args()
     
     # Run all steps if --all is specified
@@ -586,26 +1177,75 @@ def main():
         args.process = True
         args.embed = True
         args.index = True
+        args.standardize = True
+    
+    # Set default project ID if not specified
+    if not args.project_id:
+        args.project_id = GITLAB_PROJECT_ID
+    
+    # Set default group ID if not specified
+    if not args.group_id:
+        args.group_id = GITLAB_GROUP_ID
+    
+    logger.info("Starting pipeline with the following steps:")
+    if args.extract:
+        logger.info("- Extract data from GitLab")
+    if args.process:
+        logger.info("- Process and chunk data")
+    if args.embed:
+        logger.info("- Generate embeddings for chunks")
+    if args.index:
+        logger.info("- Index chunks in Azure AI Search")
+    if args.standardize:
+        logger.info("- Standardize source URLs")
+    if args.overwrite:
+        logger.info("- Overwriting existing data")
     
     # Extract data
     if args.extract:
-        logger.info(f"Extracting data from GitLab projects: {args.project_id}")
-        extract_data(args.project_id, args.group_id, args.group_projects_id)
+        extract_data(args.project_id, args.group_id, args.group_projects_id, 
+                    extract_commits=False)  # Explicitly exclude commits as per user preference
     
-    # Process and chunk data
-    if args.process:
-        logger.info(f"Processing and chunking data for projects: {args.project_id}")
-        process_chunks(args.project_id)
-    
-    # Generate embeddings
-    if args.embed:
-        logger.info(f"Generating embeddings for projects: {args.project_id}")
-        generate_embeddings(args.project_id)
+    # Process and chunk data, and generate embeddings
+    if args.process or args.embed:
+        logger.info(f"Processing, chunking, and embedding data for projects: {args.project_id}")
+        chunk_and_embed_data(args.project_id, args.group_id)
     
     # Index chunks
     if args.index:
         logger.info(f"Indexing chunks for projects: {args.project_id}")
-        index_chunks(args.project_id)
+        index_chunks(args.project_id, overwrite=args.overwrite)
+    
+    # Standardize source URLs
+    if args.standardize:
+        logger.info("Standardizing source URLs in processed data and search index")
+        # Run the standardize_source_urls.py script as a subprocess
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        standardize_script_path = os.path.join(script_dir, 'standardize_source_urls.py')
+        
+        try:
+            # Set PYTHONPATH to include the project root
+            env = os.environ.copy()
+            env['PYTHONPATH'] = os.path.dirname(script_dir)
+            
+            # Run the standardization script
+            result = subprocess.run(
+                [sys.executable, standardize_script_path],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            
+            # Log the output
+            for line in result.stdout.splitlines():
+                logger.info(f"Standardization: {line}")
+                
+            logger.info("Source URL standardization complete")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error standardizing source URLs: {e}")
+            logger.error(f"Stderr: {e.stderr}")
+            logger.error(f"Stdout: {e.stdout}")
     
     logger.info("Pipeline initialization complete")
 

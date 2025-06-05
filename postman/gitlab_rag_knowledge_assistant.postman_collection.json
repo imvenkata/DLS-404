@@ -1,0 +1,315 @@
+{
+	"info": {
+		"_postman_id": "a8e5f3c2-7b1d-4f5c-9e8a-6f3d9b5c8d7e",
+		"name": "GitLab RAG Knowledge Assistant",
+		"description": "Collection for testing the GitLab RAG Knowledge Assistant API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Simplified API",
+			"item": [
+				{
+					"name": "API Info (Simplified)",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "http://localhost:8002/",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8002",
+							"path": [
+								""
+							]
+						},
+						"description": "Get information about the simplified API"
+					}
+				},
+				{
+					"name": "Health Check (Simplified)",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "http://localhost:8002/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8002",
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check the health of the simplified API and its components"
+					}
+				},
+				{
+					"name": "Query - Chunking System (Simplified)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"How does the chunking system work in the GitLab RAG application?\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8002",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Search for content about the chunking system using the simplified API"
+					}
+				},
+				{
+					"name": "Query - Embedding Generation (Simplified)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"How are embeddings generated and stored in the Azure Search index?\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8002",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Search for content about embedding generation using the simplified API"
+					}
+				},
+				{
+					"name": "Query with Source Type Filter (Simplified)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"How does the agentic workflow process queries?\",\n    \"source_types\": [\"code\", \"documentation\"]\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8002/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8002",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Search with source type filtering using the simplified API"
+					}
+				}
+			]
+		},
+		{
+			"name": "Agentic API",
+			"item": [
+				{
+					"name": "API Info",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "http://localhost:8001/",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								""
+							]
+						},
+						"description": "Get information about the API"
+					}
+				},
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "http://localhost:8001/health",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"health"
+							]
+						},
+						"description": "Check the health of the API and its components"
+					}
+				},
+				{
+					"name": "Process Query - Chunking System",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"How does the chunking system work in the GitLab RAG application?\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8001/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Process a query about the chunking system"
+					}
+				},
+				{
+					"name": "Process Query - Embedding Generation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"How are embeddings generated and stored in the Azure Search index?\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8001/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Process a query about embedding generation"
+					}
+				},
+				{
+					"name": "Process Query - Agentic Workflow",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"Explain how the agentic workflow processes queries in the knowledge assistant\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8001/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Process a query about the agentic workflow"
+					}
+				},
+				{
+					"name": "Process Query - Issue Creation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"Create an issue to fix the embedding indexing pipeline\"\n}"
+						},
+						"url": {
+							"raw": "http://localhost:8001/query",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8001",
+							"path": [
+								"query"
+							]
+						},
+						"description": "Process a query to create an issue"
+					}
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8001",
+			"type": "string"
+		}
+	]
+}
