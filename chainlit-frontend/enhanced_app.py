@@ -50,30 +50,45 @@ async def start():
     """Initialize the chat session with enhanced welcome message and quick actions."""
     global knowledge_assistant
     
-    # Welcome message with enhanced formatting
-    welcome_content = """# 🚀 Welcome to DLS-404 Knowledge Assistant!
+    # Welcome message with title and enhanced formatting
+    welcome_content = """# 🤖 AI Knowledge Assistant
 
-I'm your **AI-powered assistant** that can help you with:
+Welcome to your **intelligent project companion**! I can help you with:
 
-## 🔍 **Knowledge Discovery**
+## 🔍 **Ask Questions**
 - 📖 Search through project documentation
 - 🔍 Find specific information with source citations
 - 📊 Explore project resources and code patterns
 
-## 📝 **GitLab Integration**
-- ✍️ Create professional user stories from natural language
-- 🎯 Decompose epics into actionable stories
-- 📋 Generate issue templates with acceptance criteria
+## 📝 **Create User Stories**
+- ✍️ Generate professional user stories from natural language
+- 📋 Format them with acceptance criteria and definitions of done
+- 🎯 Create GitLab issues with proper templates
 
-## 💻 **Context-Aware Code Generation**
-- 🛠️ Generate code using your project's patterns
-- 🔄 Create scripts consistent with your codebase
+## 🎯 **Decompose Epics**
+- 🔄 Break down large epics into actionable stories
+- 📝 Generate multiple user stories from epic descriptions
+- ✅ Review and batch create issues in GitLab
+
+## 💻 **Generate Code**
+- 🛠️ Create code using your project's patterns
+- 🔄 Generate scripts consistent with your codebase
 - 💡 Get implementation suggestions with explanations
 
-## 📁 **Document Analysis**
+## 📁 **Upload Guide**
 - 📤 Upload files for analysis and questions
 - 🔗 Integrate uploaded content with existing knowledge
 - 📈 Extract insights from your documents
+
+## 📋 **Create Templates**
+- 🗂️ Generate project templates and boilerplates
+- 📐 Create standardized documentation formats
+- 🏗️ Build reusable code and configuration templates
+
+## 📊 **Status Reports**
+- 📈 Generate project progress summaries
+- 📋 Create team status updates
+- 🎯 Track milestone achievements and metrics
 
 ---
 
@@ -82,16 +97,18 @@ Use the action buttons below or simply type your request!"""
 
     await cl.Message(
         content=welcome_content,
-        author="DLS-404 Assistant"
+        author="AI Knowledge Assistant"
     ).send()
     
-    # Add quick action buttons
+    # Add quick action buttons with proper names
     actions = [
-        cl.Action(name="ask_question", value="ask", description="🔍 Ask about project"),
-        cl.Action(name="create_user_story", value="story", description="📝 Create user story"),
-        cl.Action(name="decompose_epic", value="epic", description="🎯 Decompose epic"),
-        cl.Action(name="generate_code", value="code", description="💻 Generate code"),
-        cl.Action(name="upload_guide", value="upload", description="📁 Upload file guide"),
+        cl.Action(name="ask_question", value="ask", description="🔍 Ask Questions"),
+        cl.Action(name="create_user_story", value="story", description="📝 Create User Story"),
+        cl.Action(name="decompose_epic", value="epic", description="🎯 Decompose Epic"),
+        cl.Action(name="generate_code", value="code", description="💻 Generate Code"),
+        cl.Action(name="upload_guide", value="upload", description="📁 Upload Guide"),
+        cl.Action(name="create_templates", value="templates", description="📋 Create Templates"),
+        cl.Action(name="status_reports", value="status", description="📊 Status Reports"),
     ]
     
     await cl.Message(
@@ -102,7 +119,7 @@ Use the action buttons below or simply type your request!"""
     
     # Initialize the knowledge assistant with enhanced error handling
     async with cl.Step(name="Initializing", type="tool") as step:
-        step.input = "Setting up Knowledge Assistant..."
+        step.input = "Setting up AI Knowledge Assistant..."
         
         try:
             knowledge_assistant = KnowledgeAssistant(
@@ -116,20 +133,12 @@ Use the action buttons below or simply type your request!"""
             cl.user_session.set("chat_history", [])
             cl.user_session.set("uploaded_files", [])
             
-            step.output = "✅ Knowledge Assistant initialized successfully!"
+            step.output = "✅ AI Knowledge Assistant initialized successfully!"
             logger.info("Knowledge Assistant initialized successfully")
             
-            # Show connection status
-            status_message = """### 🔗 **Connection Status:**
-✅ **Azure OpenAI**: Connected  
-✅ **Azure AI Search**: Connected  
-✅ **GitLab API**: Ready  
-✅ **Knowledge Base**: Loaded  
-
-**Ready to assist!** What would you like to do first?"""
-            
+            # Simple ready message without connection details
             await cl.Message(
-                content=status_message,
+                content="🚀 **Ready to assist!** What would you like to do first?",
                 author="System"
             ).send()
             
@@ -142,13 +151,8 @@ Use the action buttons below or simply type your request!"""
                 content=f"""### ⚠️ **Initialization Error**
 {error_msg}
 
-**Please check:**
-- Azure OpenAI credentials and endpoint
-- Azure AI Search service configuration  
-- GitLab token permissions
-- Network connectivity
-
-Try refreshing the page or contact support if the issue persists.""",
+**Please check your configuration and try refreshing the page.**
+Contact support if the issue persists.""",
                 author="System"
             ).send()
 
@@ -156,7 +160,9 @@ Try refreshing the page or contact support if the issue persists.""",
 async def ask_question_action(action):
     """Quick action for knowledge discovery."""
     await cl.Message(
-        content="""### 🔍 **Ask me anything about your project!**
+        content="""### 🔍 **Ask Questions**
+
+**Ask me anything about your project!**
 
 **Examples:**
 - *"What is the project charter for DLS-404?"*
@@ -164,19 +170,19 @@ async def ask_question_action(action):
 - *"Show me the API documentation"*
 - *"What are the main components of the system?"*
 
-**Just type your question and I'll search through:**
+**I'll search through:**
 - 📖 Documentation and markdown files
 - 💻 Source code and scripts  
 - 🎫 GitLab issues and merge requests
 - 🏗️ Infrastructure and configuration files""",
-        author="DLS-404 Assistant"
+        author="AI Knowledge Assistant"
     ).send()
 
 @cl.action_callback("create_user_story")
 async def create_user_story_action(action):
     """Quick action to create a user story."""
     await cl.Message(
-        content="""### 📝 **Create a User Story**
+        content="""### 📝 **Create User Story**
 
 Please provide your user story in this format:
 
@@ -187,19 +193,19 @@ Please provide your user story in this format:
 - *"As a data scientist, I want to access the ML pipeline API, so that I can train models programmatically."*
 - *"As a project manager, I want to see progress dashboards, so that I can track team productivity."*
 
-I'll format it as a professional GitLab issue with:
+**I'll format it as a professional GitLab issue with:**
 - ✅ Proper title and description
 - 📋 Acceptance criteria checklist  
 - 🎯 Definition of done
 - 🏷️ Appropriate labels""",
-        author="DLS-404 Assistant"
+        author="AI Knowledge Assistant"
     ).send()
 
 @cl.action_callback("decompose_epic")
 async def decompose_epic_action(action):
     """Quick action to decompose an epic."""
     await cl.Message(
-        content="""### 🎯 **Decompose an Epic**
+        content="""### 🎯 **Decompose Epic**
 
 Provide the epic you'd like to break down into user stories:
 
@@ -214,7 +220,7 @@ Provide the epic you'd like to break down into user stories:
 - 📝 Generate 3-8 meaningful user stories
 - ✅ Present them for your review
 - 🚀 Create them all in GitLab after confirmation""",
-        author="DLS-404 Assistant"
+        author="AI Knowledge Assistant"
     ).send()
 
 @cl.action_callback("generate_code")
@@ -237,14 +243,14 @@ Tell me what code you'd like me to create:
 - 💡 Clear explanations for design choices
 - 🔗 References to existing code examples
 - ✅ Production-ready implementations""",
-        author="DLS-404 Assistant"
+        author="AI Knowledge Assistant"
     ).send()
 
 @cl.action_callback("upload_guide")
 async def upload_guide_action(action):
     """Guide for file upload functionality."""
     await cl.Message(
-        content="""### 📁 **File Upload Guide**
+        content="""### 📁 **Upload Guide**
 
 You can upload files for analysis and questions!
 
@@ -267,7 +273,60 @@ You can upload files for analysis and questions!
 3. Ask questions about the uploaded content
 
 Try uploading a document and asking: *"Summarize this file"* or *"What are the key requirements?"*""",
-        author="DLS-404 Assistant"
+        author="AI Knowledge Assistant"
+    ).send()
+
+@cl.action_callback("create_templates")
+async def create_templates_action(action):
+    """Quick action for creating templates."""
+    await cl.Message(
+        content="""### 📋 **Create Templates**
+
+I can help you generate various project templates and boilerplates:
+
+**Template Types:**
+- 📝 **Documentation Templates**: README, API docs, user guides
+- 🏗️ **Code Templates**: Classes, functions, modules, microservices
+- ⚙️ **Configuration Templates**: Docker, CI/CD, deployment configs
+- 📋 **Project Templates**: Issue templates, PR templates, project structures
+- 🧪 **Testing Templates**: Unit tests, integration tests, test data
+
+**Examples:**
+- *"Create a README template for a new microservice"*
+- *"Generate a Docker template for Python applications"*
+- *"Create a GitLab issue template for bug reports"*
+- *"Generate a CI/CD pipeline template"*
+- *"Create a API documentation template"*
+
+**What would you like to create a template for?**""",
+        author="AI Knowledge Assistant"
+    ).send()
+
+@cl.action_callback("status_reports")
+async def status_reports_action(action):
+    """Quick action for generating status reports."""
+    await cl.Message(
+        content="""### 📊 **Status Reports**
+
+I can help you generate comprehensive project status reports:
+
+**Report Types:**
+- 📈 **Project Progress**: Overall completion, milestones, timeline
+- 👥 **Team Status**: Individual contributions, workload, blockers
+- 🎯 **Sprint Reports**: Sprint goals, completed items, burndown
+- 📋 **Epic Status**: Epic progress, related stories, completion rates
+- 🚀 **Release Reports**: Feature completion, deployment status, risks
+- 📊 **Metrics Dashboard**: KPIs, performance indicators, trends
+
+**Examples:**
+- *"Generate a weekly status report for the DLS-404 project"*
+- *"Create a sprint summary for the current iteration"*
+- *"Show me the completion status of epic 1"*
+- *"Generate a team productivity report"*
+- *"Create a monthly progress summary"*
+
+**What type of status report would you like me to generate?**""",
+        author="AI Knowledge Assistant"
     ).send()
 
 @cl.on_message
@@ -334,7 +393,7 @@ async def main(message: cl.Message):
         # Send the response with enhanced formatting
         await cl.Message(
             content=response,
-            author="DLS-404 Assistant"
+            author="AI Knowledge Assistant"
         ).send()
         
         # Add follow-up suggestions

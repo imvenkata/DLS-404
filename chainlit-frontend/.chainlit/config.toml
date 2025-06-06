@@ -54,10 +54,10 @@ edit_message = true
 
 [UI]
 # Name of the assistant.
-name = "DLS-404 Knowledge Assistant"
+name = "AI Knowledge Assistant"
 
 # Description of the assistant. This is used for HTML tags.
-description = "AI-powered assistant for DLS-404 project - knowledge discovery, GitLab integration, and code generation"
+description = "Intelligent AI companion for project management - knowledge discovery, user story creation, epic decomposition, code generation, template creation, and status reporting"
 
 # Large size content are by default collapsed for a cleaner ui
 default_collapse_content = true
