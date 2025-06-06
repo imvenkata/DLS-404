@@ -53,12 +53,7 @@ async def start():
     # Welcome message with clean and simple introduction
     welcome_content = """# 🤖 AI Knowledge Assistant
 
-Welcome to your **intelligent project companion**! 
-
----
-
-### 🎯 **Quick Actions:**
-Use the action buttons below or simply type your request!"""
+Welcome to your **intelligent project companion**!"""
 
     await cl.Message(
         content=welcome_content,
