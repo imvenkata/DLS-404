@@ -118,13 +118,13 @@ Use the action buttons below or simply type your request!"""
     
     # Add quick action buttons with proper names
     actions = [
-        cl.Action(name="ask_question", value="ask", description="🔍 Ask Questions"),
-        cl.Action(name="create_user_story", value="story", description="📝 Create User Story"),
-        cl.Action(name="decompose_epic", value="epic", description="🎯 Decompose Epic"),
-        cl.Action(name="generate_code", value="code", description="💻 Generate Code"),
-        cl.Action(name="upload_guide", value="upload", description="📁 Upload Guide"),
-        cl.Action(name="create_templates", value="templates", description="📋 Create Templates"),
-        cl.Action(name="status_reports", value="status", description="📊 Status Reports"),
+        cl.Action(name="ask_question", value="ask", description="Ask Question"),
+        cl.Action(name="create_user_story", value="story", description="Create User Story"),
+        cl.Action(name="decompose_epic", value="epic", description="Decompose Epic"),
+        cl.Action(name="generate_code", value="code", description="Generate Code"),
+        cl.Action(name="upload_guide", value="upload", description="Upload Guide"),
+        cl.Action(name="create_templates", value="templates", description="Create Templates"),
+        cl.Action(name="status_reports", value="status", description="Status Reports"),
     ]
     
     await cl.Message(
