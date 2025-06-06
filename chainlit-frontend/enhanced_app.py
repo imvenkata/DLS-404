@@ -50,30 +50,61 @@ async def start():
     """Initialize the chat session with enhanced welcome message and quick actions."""
     global knowledge_assistant
     
-    # Welcome message with title and enhanced formatting in grid layout
+    # Welcome message with individual boxes for each category
     welcome_content = """# 🤖 AI Knowledge Assistant
 
 Welcome to your **intelligent project companion**! 
 
 ## 🎯 **What I Can Help You With:**
 
-| 🔍 **Ask Questions** | 📝 **Create User Stories** | 🎯 **Decompose Epics** |
-|:---|:---|:---|
-| 📖 Search through project documentation | ✍️ Generate professional user stories | 🔄 Break down large epics into actionable stories |
-| 🔍 Find specific information with citations | 📋 Format with acceptance criteria | 📝 Generate multiple user stories from descriptions |
-| 📊 Explore project resources and patterns | 🎯 Create GitLab issues with templates | ✅ Review and batch create issues in GitLab |
+---
 
-| 💻 **Generate Code** | 📁 **Upload Guide** | 📋 **Create Templates** |
-|:---|:---|:---|
-| 🛠️ Create code using your project's patterns | 📤 Upload files for analysis and questions | 🗂️ Generate project templates and boilerplates |
-| 🔄 Generate scripts consistent with codebase | 🔗 Integrate uploaded content with knowledge | 📐 Create standardized documentation formats |
-| 💡 Get implementation suggestions | 📈 Extract insights from your documents | 🏗️ Build reusable code and configuration templates |
+### 🔍 **Ask Questions**
+> 📖 Search through project documentation  
+> 🔍 Find specific information with citations  
+> 📊 Explore project resources and patterns  
 
-| 📊 **Status Reports** | | |
-|:---|:---|:---|
-| 📈 Generate project progress summaries | | |
-| 📋 Create team status updates | | |
-| 🎯 Track milestone achievements and metrics | | |
+---
+
+### 📝 **Create User Stories**
+> ✍️ Generate professional user stories  
+> 📋 Format with acceptance criteria  
+> 🎯 Create GitLab issues with templates  
+
+---
+
+### 🎯 **Decompose Epics**
+> 🔄 Break down large epics into actionable stories  
+> 📝 Generate multiple user stories from descriptions  
+> ✅ Review and batch create issues in GitLab  
+
+---
+
+### 💻 **Generate Code**
+> 🛠️ Create code using your project's patterns  
+> 🔄 Generate scripts consistent with codebase  
+> 💡 Get implementation suggestions  
+
+---
+
+### 📁 **Upload Guide**
+> 📤 Upload files for analysis and questions  
+> 🔗 Integrate uploaded content with knowledge  
+> 📈 Extract insights from your documents  
+
+---
+
+### 📋 **Create Templates**
+> 🗂️ Generate project templates and boilerplates  
+> 📐 Create standardized documentation formats  
+> 🏗️ Build reusable code and configuration templates  
+
+---
+
+### 📊 **Status Reports**
+> 📈 Generate project progress summaries  
+> 📋 Create team status updates  
+> 🎯 Track milestone achievements and metrics  
 
 ---
 
