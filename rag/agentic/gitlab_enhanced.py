@@ -154,6 +154,58 @@ class GitLabEnhancedActions:
             return json.dumps({"error": error_message})
     
     @kernel_function(
+        description="Gets the title and description of a specific epic in a GitLab group.",
+        name="get_epic_details"
+    )
+    def get_epic_details(self, group_id: str, epic_iid: int) -> str:
+        """
+        Retrieves details for a specific epic within a group.
+
+        Args:
+            group_id (str): The ID or path of the group (e.g., 'dls-404').
+            epic_iid (int): The internal ID (IID) of the epic.
+            
+        Returns:
+            JSON string with epic details
+        """
+        logger.info(f"Getting epic details for epic {epic_iid} in group {group_id}")
+        
+        try:
+            if not self.client:
+                return json.dumps({"error": "GitLab client not initialized"})
+                
+            # Find the group
+            groups = self.client.groups.list(search=group_id)
+            if not groups:
+                return json.dumps({"error": f"Group {group_id} not found"})
+            
+            group = groups[0]
+            logger.info(f"Found group: {group.name} (ID: {group.id})")
+            
+            # Get the epic
+            epic = group.epics.get(epic_iid)
+            
+            epic_data = {
+                "epic_id": epic.iid,
+                "title": epic.title,
+                "description": epic.description or "",
+                "author": epic.author.get('name', 'Unknown') if epic.author else 'Unknown',
+                "url": epic.web_url,
+                "state": epic.state,
+                "created_at": epic.created_at,
+                "group_id": group.id,
+                "group_name": group.name
+            }
+            
+            logger.info(f"Retrieved epic details for epic {epic_iid}")
+            return json.dumps(epic_data, indent=2)
+            
+        except Exception as e:
+            error_message = f"Failed to get details for epic {epic_iid} in group {group_id}: {str(e)}"
+            logger.error(error_message)
+            return json.dumps({"error": error_message})
+    
+    @kernel_function(
         description="Generate a status report for a GitLab epic",
         name="generate_epic_status_report"
     )

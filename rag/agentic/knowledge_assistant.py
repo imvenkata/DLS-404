@@ -29,6 +29,7 @@ from config.config import (
 from rag.agentic.gitlab_enhanced import GitLabEnhancedActions
 from rag.agentic.gitlab_auth import GitLabAuth
 from rag.agentic.gitlab_mcp_agent import GitLabMCPAgent
+from rag.agentic.gitlab_issue_agent import GitLabIssueAgent
 from search.enhanced_azure_search import EnhancedAzureSearchClient
 from processors.embeddings_generator import EmbeddingsGenerator
 from config.mcp_config import is_mcp_configured
@@ -64,6 +65,9 @@ class KnowledgeAssistant:
                 logger.info("GitLab MCP agent initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize GitLab MCP agent: {str(e)}")
+        
+        # Initialize GitLab Issue Agent for issue creation workflows
+        self.issue_agent = GitLabIssueAgent()
         
         self.kernel = sk.Kernel()
         self.setup_kernel()
@@ -112,7 +116,12 @@ You are an AI assistant that categorizes user queries.
 User query: {{$input}}
 
 Analyze the query and select the most appropriate intent from this list: [KNOWLEDGE_DISCOVERY, ISSUE_CREATION, CODE_GENERATION, GENERAL_QUERY].
-A 'project charter' query is a KNOWLEDGE_DISCOVERY intent.
+
+Intent Guidelines:
+- ISSUE_CREATION: User wants to create GitLab issues, user stories, or decompose epics. Keywords: "create issue", "user story", "epic", "as a [role] I want", "create stories", "decompose epic"
+- CODE_GENERATION: User wants to generate, create, write, or implement code. Keywords: "create", "generate", "write", "implement", "terraform", "function", "script", "code"
+- KNOWLEDGE_DISCOVERY: User wants to find information, documentation, or project details. Keywords: "what is", "how does", "explain", "charter", "documentation"
+- GENERAL_QUERY: All other queries that don't fit the above categories.
 
 Output ONLY a JSON object with the following structure:
 {
@@ -212,12 +221,73 @@ CRITICAL INSTRUCTIONS:
         except Exception as e:
             logger.error(f"Failed to register code generation function: {e}")
 
+        # Epic decomposition function for issue creation agent
+        epic_decomposition_prompt = """
+Act as an expert Agile Product Manager. Your task is to decompose a high-level epic into a set of smaller, actionable user stories.
+
+Analyze the epic's title and description provided below. Based on the requirements and goals described, generate a list of user stories in the format "As a [role], I want to [action], so that [benefit]".
+
+**Epic Title:**
+{{$epic_title}}
+
+**Epic Description:**
+{{$epic_description}}
+
+---
+INSTRUCTIONS:
+- Identify distinct features or pieces of work within the epic.
+- For each piece of work, create a user story with a clear role, action, and benefit.
+- The 'role' should be inferred from the context (e.g., 'Software Engineer', 'Data Scientist', 'End User', 'System Administrator').
+- Focus on creating 3-8 meaningful user stories that cover the epic's scope.
+- Each story should be independent and deliverable.
+- Output ONLY a single JSON array of objects, where each object represents one user story.
+
+EXAMPLE OUTPUT:
+[
+    {
+        "role": "Software Engineer",
+        "action": "Set up the initial CI/CD pipeline structure",
+        "benefit": "we can automate testing and deployment for the project"
+    },
+    {
+        "role": "Data Scientist",
+        "action": "Develop the data cleaning and preprocessing script",
+        "benefit": "the model has a high-quality dataset for training"
+    }
+]
+"""
+        try:
+            epic_decomp_config = PromptTemplateConfig(
+                template=epic_decomposition_prompt,
+                description="Decomposes an epic into a list of user stories.",
+                input_variables=[
+                    InputVariable(name="epic_title", description="The title of the epic", is_required=True),
+                    InputVariable(name="epic_description", description="The description of the epic", is_required=True)
+                ],
+                execution_settings={"default": {"max_tokens": 2000}}
+            )
+            
+            epic_decomp_function = KernelFunction.from_prompt(
+                function_name="DecomposeEpicIntoStories",
+                plugin_name="GitLabIssueAgent",
+                prompt=epic_decomposition_prompt,
+                prompt_template_config=epic_decomp_config,
+            )
+            self.kernel.add_function(plugin_name="GitLabIssueAgent", function=epic_decomp_function)
+            logger.info("Successfully registered epic decomposition function.")
+
+        except Exception as e:
+            logger.error(f"Failed to register epic decomposition function: {e}")
 
     async def process_query(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Process a user query with improved intent routing."""
         logger.info(f"Processing query: {query}")
         if metadata is None:
             metadata = {}
+        
+        # Handle GitLab Issue Agent confirmations first
+        if self.issue_agent.is_awaiting_confirmation():
+            return await self._handle_issue_confirmation(query)
         
         try:
             intent_context = KernelArguments(input=query)
@@ -241,7 +311,7 @@ CRITICAL INSTRUCTIONS:
             
             # More robust routing logic. Default to a knowledge search for any unrecognized intent.
             if intent == "ISSUE_CREATION":
-                return "Issue creation logic goes here."
+                return await self._process_issue_creation(query)
             elif intent == "CODE_GENERATION":
                 return await self._process_context_aware_code_generation(query)
             else: # Handles KNOWLEDGE_DISCOVERY, GENERAL_QUERY, and any other case
@@ -253,6 +323,212 @@ CRITICAL INSTRUCTIONS:
             logger.warning("Falling back to knowledge discovery due to the error.")
             return await self._process_knowledge_discovery(query, metadata)
 
+    async def _handle_issue_confirmation(self, query: str) -> str:
+        """Handle confirmation responses for issue creation workflows."""
+        logger.info(f"Handling issue confirmation for query: {query}")
+        
+        if self.issue_agent.get_state() == "awaiting_batch_confirmation":
+            # Handle BATCH confirmation for epic decomposition
+            if "yes" in query.lower():
+                drafts = self.issue_agent.get_drafts()
+                if not drafts:
+                    self.issue_agent.reset()
+                    return "There was an error; no issue drafts were found. Please start over."
+
+                logger.info(f"User confirmed. Creating {len(drafts)} issues via GitLab.")
+                
+                created_count = 0
+                error_count = 0
+                results = []
+
+                for draft in drafts:
+                    try:
+                        # Use GitLab MCP agent or enhanced actions to create each issue
+                        if self.gitlab_mcp_agent:
+                            result = await self.gitlab_mcp_agent.create_issue(
+                                project_id=draft["project_id"],
+                                title=draft["title"],
+                                description=draft["description"],
+                                labels=draft.get("labels", [])
+                            )
+                        else:
+                            # Fallback to enhanced actions
+                            result = self.gitlab_actions.create_user_story(
+                                epic_url=f"https://gitlab.com/groups/dls-404/-/epics/{draft.get('epic_id', '')}",
+                                role=draft["title"].split("As a ")[1].split(",")[0] if "As a " in draft["title"] else "User",
+                                action=draft["title"],
+                                benefit="achieve project goals",
+                                checklist="Standard checklist"
+                            )
+                        
+                        results.append(result)
+                        created_count += 1
+                        logger.info(f"Successfully created issue: {draft['title']}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to create issue '{draft['title']}': {e}")
+                        error_count += 1
+                
+                self.issue_agent.reset()
+                return f"✅ Batch creation complete!\n\n**Results:**\n- Successfully created: {created_count} issues\n- Failed to create: {error_count} issues\n\nAll user stories have been added to GitLab and linked to the epic."
+            
+            elif "no" in query.lower():
+                self.issue_agent.reset()
+                return "❌ Cancelled the batch issue creation. No issues were created in GitLab."
+            
+            else:
+                return "I am awaiting confirmation for the batch creation. Please respond with **'yes'** to proceed or **'no'** to cancel."
+        
+        elif self.issue_agent.get_state() == "awaiting_confirmation":
+            # Handle single issue confirmation
+            if "yes" in query.lower():
+                draft = self.issue_agent.get_single_draft()
+                if not draft:
+                    self.issue_agent.reset()
+                    return "There was an error; no issue draft was found. Please start over."
+
+                try:
+                    if self.gitlab_mcp_agent:
+                        result = await self.gitlab_mcp_agent.create_issue(
+                            project_id=draft["project_id"],
+                            title=draft["title"],
+                            description=draft["description"],
+                            labels=draft.get("labels", [])
+                        )
+                    else:
+                        result = "Issue would be created via enhanced actions (fallback)"
+                    
+                    self.issue_agent.reset()
+                    return f"✅ Issue created successfully!\n\n**Title:** {draft['title']}\n\nThe user story has been added to GitLab."
+                    
+                except Exception as e:
+                    logger.error(f"Failed to create single issue: {e}")
+                    self.issue_agent.reset()
+                    return f"❌ Failed to create the issue: {str(e)}"
+            
+            elif "no" in query.lower():
+                self.issue_agent.reset()
+                return "❌ Cancelled the issue creation. No issue was created in GitLab."
+            
+            else:
+                return "I am awaiting confirmation for the issue creation. Please respond with **'yes'** to proceed or **'no'** to cancel."
+        
+        # Should not reach here
+        self.issue_agent.reset()
+        return "There was an error with the confirmation workflow. Please start over."
+
+    async def _process_issue_creation(self, query: str) -> str:
+        """
+        Handles the start of the issue creation workflow.
+        It now decides whether to create a single issue or decompose an epic.
+        """
+        logger.info("Processing issue creation request")
+        
+        # A simple regex to find an epic URL or reference
+        epic_match = re.search(r'(?:epic|epics/)(?:\s*)(\d+)', query, re.IGNORECASE)
+        epic_url_match = re.search(r'https://gitlab\.com/groups/[^/]+/-/epics/(\d+)', query)
+        
+        # A simple check to see if the user is providing story details directly
+        has_story_details = "as a" in query.lower() and "i want to" in query.lower()
+
+        if (epic_match or epic_url_match) and not has_story_details:
+            # --- NEW WORKFLOW: DECOMPOSE EPIC ---
+            epic_iid = int(epic_match.group(1)) if epic_match else int(epic_url_match.group(1))
+            # Default group and project IDs - these should be configurable
+            group_id = "dls-404"
+            project_id = "dls-404/DLS-404"
+
+            logger.info(f"Starting epic decomposition for epic iid: {epic_iid}")
+            
+            try:
+                # 1. Fetch Epic Details
+                epic_details_str = await self.kernel.invoke(
+                    plugin_name="GitLabActions", 
+                    function_name="get_epic_details", 
+                    arguments=KernelArguments(group_id=group_id, epic_iid=epic_iid)
+                )
+                
+                epic_details = json.loads(str(epic_details_str))
+                if "error" in epic_details:
+                    return f"❌ Error retrieving epic details: {epic_details['error']}"
+
+                logger.info(f"Retrieved epic: {epic_details['title']}")
+
+                # 2. Decompose Epic into Stories
+                decomp_args = KernelArguments(
+                    epic_title=epic_details['title'], 
+                    epic_description=epic_details['description'] or "No description provided"
+                )
+                story_list_str = await self.kernel.invoke(
+                    plugin_name="GitLabIssueAgent", 
+                    function_name="DecomposeEpicIntoStories", 
+                    arguments=decomp_args
+                )
+                
+                try:
+                    # Clean the response to extract JSON
+                    story_response = str(story_list_str).strip()
+                    json_match = re.search(r'\[.*\]', story_response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        decomposed_stories = json.loads(json_str)
+                    else:
+                        raise json.JSONDecodeError("No JSON array found", story_response, 0)
+                        
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error parsing decomposed stories: {e}")
+                    return f"❌ I had trouble analyzing the epic to create stories. The AI returned an invalid format. Please try again or provide a different epic."
+
+                if not decomposed_stories:
+                    return f"❌ I analyzed the epic '{epic_details['title']}' but could not identify any clear user stories to create. The epic description might need more detail."
+
+                # 3. Hand off to the issue agent to ask for batch confirmation
+                epic_context = {"project_id": project_id, "epic_id": epic_iid}
+                return self.issue_agent.start_epic_decomposition_flow(epic_context, decomposed_stories)
+                
+            except Exception as e:
+                logger.error(f"Error in epic decomposition workflow: {str(e)}")
+                return f"❌ I encountered an error while processing the epic: {str(e)}"
+        
+        elif has_story_details:
+            # --- OLD WORKFLOW: CREATE SINGLE ISSUE ---
+            logger.info("Starting single issue creation flow.")
+            
+            # Extract user story components using regex
+            story_match = re.search(
+                r'as a ([^,]+),\s*i want to ([^,]+)(?:,\s*so that (.+))?', 
+                query.lower()
+            )
+            
+            if story_match:
+                role = story_match.group(1).strip()
+                action = story_match.group(2).strip()
+                benefit = story_match.group(3).strip() if story_match.group(3) else "achieve project goals"
+                
+                # Default project configuration
+                issue_data = {
+                    "project_id": "dls-404/DLS-404",
+                    "epic_id": None,
+                    "user_story": {
+                        "role": role.title(),
+                        "action": action,
+                        "benefit": benefit
+                    }
+                }
+                
+                return self.issue_agent.start_single_issue_flow(issue_data)
+            else:
+                return "❌ I couldn't parse the user story format. Please use the format: 'As a [role], I want to [action], so that [benefit]'"
+        
+        else:
+            return """To create issues, please either:
+
+1. **For Epic Decomposition:** Provide an epic reference like:
+   - "Create stories for epic 42"
+   - "Decompose epic https://gitlab.com/groups/dls-404/-/epics/42"
+
+2. **For Single Issue:** Provide a complete user story like:
+   - "As a developer, I want to implement authentication, so that users can securely access the system" """
 
     async def _process_knowledge_discovery(self, query: str, metadata: Dict[str, Any]) -> str:
         """Process a knowledge discovery query with a simplified and robust search."""
