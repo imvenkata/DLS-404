@@ -194,11 +194,18 @@ async def process_query(request_data: QueryRequest):
             assistant = get_assistant(request_data.session_id)
             
             # Add timeout handling for Azure OpenAI requests
+            # Use longer timeout for code generation queries
+            code_generation_keywords = ["create", "generate", "write", "implement", "build", "develop", "terraform", "function", "script", "code"]
+            is_code_generation = any(keyword in query.lower() for keyword in code_generation_keywords)
+            
+            # Set timeout based on query type
+            timeout_duration = 60.0 if is_code_generation else 30.0
+            
             try:
-                # Set a reasonable timeout (30 seconds) for the entire knowledge assistant process
+                # Set a reasonable timeout for the entire knowledge assistant process
                 response = await asyncio.wait_for(
                     assistant.process_query(query, metadata=enhanced_metadata), 
-                    timeout=30.0
+                    timeout=timeout_duration
                 )
             except asyncio.TimeoutError:
                 # Immediate timeout fallback
@@ -299,8 +306,9 @@ Please try one of the suggested queries above, or contact the system administrat
                 raise assistant_error
         
         # Validation layer: Check if the response contains code that might be hallucinated
-        if "```" in response:
-            # If code blocks are present in the response
+        # Skip validation for code generation queries since they're supposed to create new code
+        if "```" in response and not is_code_generation:
+            # If code blocks are present in the response (and it's not a code generation query)
             if not any(source_marker in response for source_marker in [
                 "[Source:", "Source:", "source:", "From repository:", "from the repository:", 
                 "from source:", "found in:", "located at:"
@@ -349,40 +357,8 @@ def format_response_for_frontend(response: str, query: str) -> dict:
     Returns:
         A structured response object for the frontend with parsed components and ordering information
     """
-    # Create a working copy of the response that we'll modify for the message field
+    # The message response will be the original response (it already has proper markdown links)
     message_response = response
-    
-    # Replace plain source citations with clickable markdown links in the message field
-    source_pattern = re.compile(r'\[(Source:\s+([^\]|]+))\]')
-    source_replacements = {}
-    
-    # First collect all sources from the structured sources we extract later
-    extracted_sources = {}
-    
-    # Extract source citations to build our URL mappings
-    sources_extract_pattern = re.compile(r'\[(Source:\s+[^\]]+)\]|\[Source:\s+([^\]]+)\]\(([^\)]+)\)')
-    for match in sources_extract_pattern.finditer(response):
-        if match.group(1):  # Standard citation format
-            source_text = match.group(1)
-            path_match = re.search(r'Source:\s*([^|\]]+)', source_text)
-            if path_match:
-                path = path_match.group(1).strip()
-                url = f"https://gitlab.com/dls-404/DLS-404/-/blob/master/{path}"
-                extracted_sources[path] = url
-        elif match.group(2) and match.group(3):  # Markdown link format
-            path = match.group(2).strip()
-            url = match.group(3)
-            extracted_sources[path] = url
-    
-    # Now process the message response and replace citations with markdown links
-    for match in source_pattern.finditer(message_response):
-        full_match = match.group(0)  # The entire [Source: path] text
-        path_part = match.group(2).strip()  # Just the path
-        
-        if path_part in extracted_sources:
-            url = extracted_sources[path_part]
-            replacement = f"[Source: {path_part}]({url})"
-            message_response = message_response.replace(full_match, replacement)
     
     # Initialize the base response structure
     result = {
@@ -453,55 +429,40 @@ def format_response_for_frontend(response: str, query: str) -> dict:
         sections.append(section)
         all_components.append(section)
     
-    # Extract source citations
+    # Extract source citations (both markdown and plain formats)
     sources = []
-    # Find both standard source citations and markdown link citations
-    source_pattern = re.compile(r'\[(Source: [^\]]+)\]|\[Source: ([^\]]+)\]\(([^\)]+)\)')
     source_set = set()
     
-    for i, match in enumerate(source_pattern.finditer(response)):
-        start_pos = match.start()
-        # Check which pattern matched
-        if match.group(1):  # Standard citation format
-            source_text = match.group(1)
-            source_url = None
-        else:  # Markdown link format
-            source_text = f"Source: {match.group(2)}"
-            source_url = match.group(3)
+    # Pattern to match both [Source: path](url) and [Source: path] formats
+    source_pattern = re.compile(r'\[Source:\s*([^\]]+)\](?:\(([^\)]+)\))?')
+    
+    for match in source_pattern.finditer(response):
+        path = match.group(1).strip()
+        url = match.group(2) if match.group(2) else None
+        
+        # Create a unique identifier for deduplication
+        source_id = f"{path}|{url or 'no-url'}"
+        
+        if source_id not in source_set:
+            source_set.add(source_id)
             
-        if source_text not in source_set:
-            source_set.add(source_text)
-            
-            # Parse the source text to extract path and URL if present
             source_info = {
                 "id": f"source-{len(sources)+1}",
                 "type": "source",
-                "position": start_pos,
-                "text": source_text
+                "position": match.start(),
+                "text": f"Source: {path}",
+                "path": path
             }
             
-            # First check for explicit URL in the source text
-            url_match = re.search(r'URL:\s*(https?://[^\s|\]]+)', source_text)
-            if url_match:
-                # Add URL both as url and as url_path for frontend compatibility
-                source_info["url"] = url_match.group(1)
-                source_info["url_path"] = url_match.group(1)
-            elif source_url:  # Use the URL from the markdown link if available
-                source_info["url"] = source_url
-                source_info["url_path"] = source_url
-                
-            # Extract the file path (comes right after "Source: ")
-            path_match = re.search(r'Source:\s*([^|\]]+)', source_text)
-            if path_match:
-                path = path_match.group(1).strip()
-                source_info["path"] = path
-                
-                # If no URL was found but we have a path, generate a fallback URL
-                if "url" not in source_info and path:
-                    # Generate GitLab URL based on path
-                    gitlab_url = f"https://gitlab.com/dls-404/DLS-404/-/blob/master/{path}"
-                    source_info["url"] = gitlab_url
-                    source_info["url_path"] = gitlab_url
+            # Add URL if available, otherwise generate a default GitLab URL
+            if url:
+                source_info["url"] = url
+                source_info["url_path"] = url
+            elif path != "Unknown Source":
+                # Generate GitLab URL for known paths
+                gitlab_url = f"https://gitlab.com/dls-404/DLS-404/-/blob/master/{path}"
+                source_info["url"] = gitlab_url
+                source_info["url_path"] = gitlab_url
             
             sources.append(source_info)
             all_components.append(source_info)

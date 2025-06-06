@@ -170,6 +170,48 @@ If the retrieved information is not relevant, state that you couldn't find any i
         except Exception as e:
             logger.error(f"Failed to register knowledge discovery function: {str(e)}")
 
+        # A generic, context-aware code generation prompt
+        contextual_code_gen_prompt = """
+Act as an expert pair programmer. Your goal is to write new code that is consistent with the style, patterns, and libraries found in the user's existing codebase.
+
+User Request: "{{$request}}"
+
+---
+Relevant Code from Existing Codebase (Context):
+{{$context}}
+---
+
+CRITICAL INSTRUCTIONS:
+1.  Analyze the provided "Context" to understand the project's conventions (e.g., libraries used, variable naming, function structure, error handling).
+2.  Generate a new, complete, and well-commented piece of code that directly fulfills the "User Request".
+3.  **IMPORTANT**: Prioritize using the exact same libraries and patterns from the "Context". For example, if the context uses `requests` for HTTP calls, use `requests` in your answer, not `httpx` or `urllib`.
+4.  If the "Context" is empty or not relevant, generate the code based on general industry best practices for the language requested.
+5.  Provide a brief explanation of *why* you wrote the code this way, referencing the context if possible. For example: "I used the `redis` library as it's already in use in `utils/cache.py`."
+6.  Wrap the final code in a single markdown code block with the correct language identifier (e.g., ```python, ```javascript, ```hcl).
+"""
+        try:
+            code_gen_config = PromptTemplateConfig(
+                template=contextual_code_gen_prompt,
+                description="Generates code consistent with existing codebase patterns.",
+                input_variables=[
+                    InputVariable(name="request", description="The user's code request", is_required=True),
+                    InputVariable(name="context", description="Relevant code snippets from the user's codebase", is_required=True)
+                ],
+                execution_settings={"default": {"max_tokens": 2000}}
+            )
+            
+            code_gen_function = KernelFunction.from_prompt(
+                function_name="GenerateFromContext",
+                plugin_name="CodeGeneration",
+                prompt=contextual_code_gen_prompt,
+                prompt_template_config=code_gen_config
+            )
+            self.kernel.add_function(plugin_name="CodeGeneration", function=code_gen_function)
+            logger.info("Successfully registered context-aware code generation function.")
+
+        except Exception as e:
+            logger.error(f"Failed to register code generation function: {e}")
+
 
     async def process_query(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Process a user query with improved intent routing."""
@@ -201,7 +243,7 @@ If the retrieved information is not relevant, state that you couldn't find any i
             if intent == "ISSUE_CREATION":
                 return "Issue creation logic goes here."
             elif intent == "CODE_GENERATION":
-                return "Code generation logic goes here."
+                return await self._process_context_aware_code_generation(query)
             else: # Handles KNOWLEDGE_DISCOVERY, GENERAL_QUERY, and any other case
                 logger.info(f"Routing intent '{intent}' to knowledge discovery.")
                 return await self._process_knowledge_discovery(query, metadata)
@@ -279,3 +321,67 @@ If the retrieved information is not relevant, state that you couldn't find any i
                 )
             else:
                 return f"I encountered an error generating a response. Please try again. Error: {str(e)}"
+
+    async def _process_context_aware_code_generation(self, query: str) -> str:
+        """
+        Performs Retrieval-Augmented Generation (RAG) for a coding request.
+        1. Retrieves relevant code snippets from the search index.
+        2. Passes them as context to the LLM to generate a new piece of code.
+        """
+        logger.info("Starting context-aware code generation workflow.")
+        
+        if not self.search_client:
+            return "I cannot provide coding suggestions without a connection to the code search index."
+
+        # 1. Retrieve context - Search for code relevant to the user's query
+        logger.info(f"Searching for code context related to: '{query}'")
+        try:
+            # We specifically search for source_type 'code' to get the best context
+            embeddings_generator = EmbeddingsGenerator(
+                endpoint=AZURE_OPENAI_ENDPOINT,
+                api_key=AZURE_OPENAI_KEY,
+                deployment=AZURE_OPENAI_EMBEDDING_DEPLOYMENT
+            )
+            query_embedding = embeddings_generator.generate_embedding(query)
+            search_results = self.search_client.search(
+                query=query, 
+                embedding=query_embedding, 
+                source_types=['code'], # Prioritize code files
+                top=5, # Get the top 5 most relevant code chunks
+                use_vector_search=True
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving context from search index: {e}")
+            return "I encountered an error while searching for code examples in your project."
+
+        # 2. Assemble the context
+        context_string = ""
+        if search_results:
+            logger.info(f"Found {len(search_results)} relevant code snippets.")
+            formatted_snippets = []
+            for result in search_results:
+                file_path = result.get('path', 'unknown_file')
+                code_snippet = result.get('content', '')
+                formatted_snippets.append(f"--- From file: {file_path} ---\n```\n{code_snippet}\n```")
+            context_string = "\n\n".join(formatted_snippets)
+        else:
+            logger.info("No relevant code snippets found in the index. The model will use general best practices.")
+            context_string = "No relevant code examples were found in the project."
+
+        # 3. Generate the new code using the context
+        logger.info("Invoking code generation function with retrieved context.")
+        code_gen_args = KernelArguments(
+            request=query,
+            context=context_string
+        )
+        
+        try:
+            result = await self.kernel.invoke(
+                plugin_name="CodeGeneration",
+                function_name="GenerateFromContext",
+                arguments=code_gen_args
+            )
+            return str(result)
+        except Exception as e:
+            logger.error(f"Error during final code generation: {e}")
+            return "I failed to generate the code after retrieving context. Please try again."
