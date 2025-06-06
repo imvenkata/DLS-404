@@ -77,44 +77,39 @@ Welcome to your **intelligent project companion**!"""
         actions=actions
     ).send()
     
-    # Initialize the knowledge assistant with enhanced error handling
-    async with cl.Step(name="Initializing", type="tool") as step:
-        step.input = "Setting up AI Knowledge Assistant..."
+    # Initialize the knowledge assistant without showing initialization step
+    try:
+        knowledge_assistant = KnowledgeAssistant(
+            search_endpoint=AZURE_SEARCH_ENDPOINT,
+            search_key=AZURE_SEARCH_KEY,
+            search_index_name=AZURE_SEARCH_INDEX_NAME
+        )
         
-        try:
-            knowledge_assistant = KnowledgeAssistant(
-                search_endpoint=AZURE_SEARCH_ENDPOINT,
-                search_key=AZURE_SEARCH_KEY,
-                search_index_name=AZURE_SEARCH_INDEX_NAME
-            )
-            
-            # Store in user session
-            cl.user_session.set("knowledge_assistant", knowledge_assistant)
-            cl.user_session.set("chat_history", [])
-            cl.user_session.set("uploaded_files", [])
-            
-            step.output = "✅ AI Knowledge Assistant initialized successfully!"
-            logger.info("Knowledge Assistant initialized successfully")
-            
-            # Simple ready message without connection details
-            await cl.Message(
-                content="🚀 **Ready to assist!** What would you like to do first?",
-                author="System"
-            ).send()
-            
-        except Exception as e:
-            error_msg = f"❌ Initialization failed: {str(e)}"
-            step.output = error_msg
-            logger.error(f"Failed to initialize Knowledge Assistant: {str(e)}")
-            
-            await cl.Message(
-                content=f"""### ⚠️ **Initialization Error**
+        # Store in user session
+        cl.user_session.set("knowledge_assistant", knowledge_assistant)
+        cl.user_session.set("chat_history", [])
+        cl.user_session.set("uploaded_files", [])
+        
+        logger.info("Knowledge Assistant initialized successfully")
+        
+        # Simple ready message without connection details
+        await cl.Message(
+            content="🚀 **Ready to assist!** What would you like to do first?",
+            author="System"
+        ).send()
+        
+    except Exception as e:
+        error_msg = f"❌ Initialization failed: {str(e)}"
+        logger.error(f"Failed to initialize Knowledge Assistant: {str(e)}")
+        
+        await cl.Message(
+            content=f"""### ⚠️ **Initialization Error**
 {error_msg}
 
 **Please check your configuration and try refreshing the page.**
 Contact support if the issue persists.""",
-                author="System"
-            ).send()
+            author="System"
+        ).send()
 
 @cl.action_callback("ask_question")
 async def ask_question_action(action):
