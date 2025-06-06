@@ -2,9 +2,14 @@
 Central configuration module for the GitLab RAG application.
 """
 import os
+import logging
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Explicitly load environment variables first
 load_dotenv()
 
 # GitLab Configuration
@@ -26,10 +31,30 @@ AZURE_OPENAI_EMBEDDING_MODEL = os.getenv("AZURE_OPENAI_EMBEDDING_MODEL", "text-e
 AZURE_OPENAI_EMBEDDING_DIMENSION = int(os.getenv("AZURE_OPENAI_EMBEDDING_DIMENSION", "1536"))
 AZURE_OPENAI_COMPLETION_DEPLOYMENT = os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT", "gpt-35-turbo")
 
-# Azure AI Search Configuration
+# Azure Search Configuration
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT", "")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY", "")
 AZURE_SEARCH_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX_NAME", "gitlab-index")
+
+# Force the correct Azure Search index name
+AZURE_SEARCH_INDEX_NAME = "gitlab-hs-index"
+
+# Ensure the environment is updated with the correct value
+os.environ["AZURE_SEARCH_INDEX_NAME"] = AZURE_SEARCH_INDEX_NAME
+
+# IMPORTANT: Uncomment and update the following lines to force the correct API key
+# if you're getting "The given API key doesn't match service's internal, primary or secondary keys" error
+# Update with your correct API key for gitlab-hs-index
+# AZURE_SEARCH_KEY = "your_correct_key_from_azure_portal"
+# logger.info(f"Forcing AZURE_SEARCH_KEY to: {AZURE_SEARCH_KEY[:5]}******")
+# os.environ["AZURE_SEARCH_KEY"] = AZURE_SEARCH_KEY
+
+# CONFIGURATION CHANGE: Update the Azure OpenAI API version to the working one
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+
+# Log the configuration values for debugging
+logger.info(f"Using AZURE_OPENAI_API_VERSION: {AZURE_OPENAI_API_VERSION}")
+logger.info(f"AZURE_SEARCH_KEY is {'SET' if AZURE_SEARCH_KEY else 'NOT SET'}")
 
 # Vector Search Configuration
 VECTOR_SEARCH_TOP_K = int(os.getenv("VECTOR_SEARCH_TOP_K", "5"))

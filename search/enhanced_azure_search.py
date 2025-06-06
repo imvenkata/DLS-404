@@ -48,12 +48,15 @@ class EnhancedAzureSearchClient:
         
         # Initialize search client
         try:
+            # Initialize search client with index name only
+            logger.info(f"Initializing Azure Search client with index: {index_name}")
+            
             self.search_client = SearchClient(
                 endpoint=endpoint,
                 index_name=index_name,
                 credential=AzureKeyCredential(api_key)
             )
-            logger.info(f"Initialized Azure AI Search clients for endpoint: {endpoint}")
+            logger.info(f"Successfully initialized Azure AI Search client for index: {index_name}")
         except Exception as e:
             logger.error(f"Error initializing Azure AI Search client: {str(e)}")
             self.search_client = None
@@ -73,8 +76,8 @@ class EnhancedAzureSearchClient:
         Args:
             query: Query text
             embedding: Query embedding
-            filters: Filters to apply to search
-            source_types: List of source types to filter by (e.g. ["code", "issue"])
+            filters: Filters to apply to search (source_types filtering disabled)
+            source_types: List of source types to filter by (DISABLED - kept for compatibility)
             top: Number of results to return
             use_vector_search: Whether to use vector search
             
@@ -85,34 +88,27 @@ class EnhancedAzureSearchClient:
             logger.error("Search client not initialized")
             return []
         
-        # Process source_types into filters if provided
-        if not filters:
-            filters = {}
-            
+        # Note: source_types filtering has been disabled due to index field issues
+        # All searches now return results from all content types
         if source_types:
-            # If we have a list of source types, create a filter for them
-            if len(source_types) == 1:
-                # Single source type
-                filters["source_type"] = source_types[0]
-            else:
-                # Multiple source types - we'll handle this in the filter string creation
-                filters["_source_types"] = source_types
-            
-            logger.info(f"Filtering by source types: {source_types}")
+            logger.info(f"Note: source_types filtering is disabled. Searching all content types instead of: {source_types}")
+        
+        # Use only explicitly provided filters, not source_types
+        search_filters = filters or {}
         
         # Determine search type
         if embedding is not None and use_vector_search:
             # Vector search
             try:
-                return self._vector_search(query, embedding, filters, top)
+                return self._vector_search(query, embedding, search_filters, top)
             except Exception as e:
                 logger.error(f"Vector search failed: {str(e)}")
                 logger.info("Falling back to keyword search")
-                return self._keyword_search(query, filters, top)
+                return self._keyword_search(query, search_filters, top)
         else:
             # Keyword search
             logger.info("Using keyword search only (no vector search)")
-            return self._keyword_search(query, filters, top)
+            return self._keyword_search(query, search_filters, top)
     
     def _keyword_search(
         self,
@@ -125,7 +121,7 @@ class EnhancedAzureSearchClient:
         
         Args:
             query: Query text
-            filters: Filters to apply to search
+            filters: Filters to apply to search (source_type filtering disabled)
             top: Number of results to return
             
         Returns:
@@ -133,21 +129,20 @@ class EnhancedAzureSearchClient:
         """
         try:
             # Prepare filter string if filters are provided
+            # Note: source_type filtering has been removed due to index field issues
             filter_string = None
             if filters:
                 filter_parts = []
                 for key, value in filters.items():
-                    # Special handling for multiple source types
-                    if key == "_source_types" and isinstance(value, list):
-                        source_type_conditions = []
-                        for source_type in value:
-                            source_type_conditions.append(f"source_type eq '{source_type}'")
-                        if source_type_conditions:
-                            filter_parts.append(f"({' or '.join(source_type_conditions)})")
-                    elif isinstance(value, str):
+                    # Skip any source_type related filters
+                    if key in ["source_type", "_source_types"]:
+                        logger.info(f"Skipping source_type filter: {key}={value}")
+                        continue
+                        
+                    if isinstance(value, str):
                         filter_parts.append(f"{key} eq '{value}'")
                     elif isinstance(value, list):
-                        # Handle other list values (not _source_types)
+                        # Handle list values
                         list_conditions = []
                         for item in value:
                             if isinstance(item, str):
@@ -162,7 +157,7 @@ class EnhancedAzureSearchClient:
                 if filter_parts:
                     filter_string = " and ".join(filter_parts)
             
-            # Perform search
+            # Perform search without source_type filtering
             results = self.search_client.search(
                 search_text=query,
                 filter=filter_string,
@@ -205,7 +200,7 @@ class EnhancedAzureSearchClient:
         Args:
             query: Query text
             embedding: Query embedding
-            filters: Filters to apply to search
+            filters: Filters to apply to search (source_type filtering disabled)
             top: Number of results to return
             
         Returns:
@@ -213,21 +208,20 @@ class EnhancedAzureSearchClient:
         """
         try:
             # Prepare filter string if filters are provided
+            # Note: source_type filtering has been removed due to index field issues
             filter_string = None
             if filters:
                 filter_parts = []
                 for key, value in filters.items():
-                    # Special handling for multiple source types
-                    if key == "_source_types" and isinstance(value, list):
-                        source_type_conditions = []
-                        for source_type in value:
-                            source_type_conditions.append(f"source_type eq '{source_type}'")
-                        if source_type_conditions:
-                            filter_parts.append(f"({' or '.join(source_type_conditions)})")
-                    elif isinstance(value, str):
+                    # Skip any source_type related filters
+                    if key in ["source_type", "_source_types"]:
+                        logger.info(f"Skipping source_type filter in vector search: {key}={value}")
+                        continue
+                        
+                    if isinstance(value, str):
                         filter_parts.append(f"{key} eq '{value}'")
                     elif isinstance(value, list):
-                        # Handle other list values (not _source_types)
+                        # Handle list values
                         list_conditions = []
                         for item in value:
                             if isinstance(item, str):
@@ -245,13 +239,16 @@ class EnhancedAzureSearchClient:
             # Implement hybrid search using a compatible approach
             logger.info("Implementing hybrid search using compatible approach")
             
-            # First, perform keyword search to get initial results
+            # Perform keyword search to get initial results without source_type filtering
             logger.info(f"Step 1: Performing keyword search with query: {query}")
             keyword_search_options = {
                 "top": top * 2,  # Get more results for re-ranking
-                "filter": filter_string,
                 "include_total_count": True
             }
+            
+            # Add filter if provided (but not source_type filters)
+            if filter_string:
+                keyword_search_options["filter"] = filter_string
             
             # Perform keyword search
             keyword_results = self.search_client.search(

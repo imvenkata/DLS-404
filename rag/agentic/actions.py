@@ -20,21 +20,42 @@ try:
     # Alias for backward compatibility
     sk_function = kernel_function
     sk_function_context_parameter = kernel_function_context_parameter
+    SEMANTIC_KERNEL_AVAILABLE = True
+    logging.info("Using new Semantic Kernel function decorators")
 except ImportError:
     try:
         # Try importing from the old location (older versions)
         from semantic_kernel.skill_definition import sk_function, sk_function_context_parameter
+        SEMANTIC_KERNEL_AVAILABLE = True
+        logging.info("Using legacy Semantic Kernel function decorators")
     except ImportError:
-        # If both fail, create dummy decorators
-        def sk_function(*args, **kwargs):
+        # If both fail, create logging decorators instead of dummy ones
+        SEMANTIC_KERNEL_AVAILABLE = False
+        logging.warning("Semantic Kernel not available - functions will not be registered automatically")
+        
+        def sk_function(description=None, name=None):
+            """Fallback decorator that logs function registration attempts."""
             def decorator(func):
+                func._sk_function_metadata = {
+                    "description": description,
+                    "name": name or func.__name__
+                }
+                logging.warning(f"Function '{func.__name__}' decorated but Semantic Kernel not available")
                 return func
-            return decorator if args and callable(args[0]) else decorator
+            return decorator
             
-        def sk_function_context_parameter(*args, **kwargs):
+        def sk_function_context_parameter(name=None, description=None):
+            """Fallback decorator that logs parameter registration attempts."""
             def decorator(func):
+                if not hasattr(func, '_sk_parameters'):
+                    func._sk_parameters = []
+                func._sk_parameters.append({
+                    "name": name,
+                    "description": description
+                })
+                logging.warning(f"Parameter '{name}' registered for '{func.__name__}' but Semantic Kernel not available")
                 return func
-            return decorator if args and callable(args[0]) else decorator
+            return decorator
 
 # Handle SKContext compatibility
 try:
@@ -107,13 +128,42 @@ class GitLabActions:
                 self.mcp_client = None
         
         # Initialize direct GitLab client as fallback
-        if not self.mcp_client:
+        if not self.mcp_client and gitlab_url and gitlab_token:
             try:
+                import gitlab
                 self.client = gitlab.Gitlab(url=gitlab_url, private_token=gitlab_token)
                 self.client.auth()
                 logger.info(f"GitLab client initialized for {gitlab_url}")
+            except ImportError:
+                logger.error("GitLab library not available - GitLab operations will not work")
             except Exception as e:
                 logger.error(f"Error initializing GitLab client: {str(e)}")
+        elif not gitlab_url or not gitlab_token:
+            logger.warning("GitLab URL or token not provided - some operations may not work")
+    
+    def _safe_context_get(self, context, key: str, default=None):
+        """
+        Safely get a value from context, handling both dict-like and attribute access.
+        
+        Args:
+            context: Context object or dict
+            key: Key to retrieve
+            default: Default value if key not found
+            
+        Returns:
+            Value from context or default
+        """
+        try:
+            if hasattr(context, 'get'):
+                return context.get(key, default)
+            elif hasattr(context, key):
+                return getattr(context, key, default)
+            elif isinstance(context, dict):
+                return context.get(key, default)
+            else:
+                return context[key] if key in context else default
+        except (KeyError, AttributeError, TypeError):
+            return default
     
     @sk_function(
         description="Get information about a GitLab epic",
@@ -137,12 +187,19 @@ class GitLabActions:
         Returns:
             JSON string with epic information
         """
+        # Safe context access
+        epic_id = self._safe_context_get(context, "epic_id")
+        project_id = self._safe_context_get(context, "project_id", None)
+        
         # Handle special case for Epic 123 which is mentioned in the query
-        if context["epic_id"] == "123" or context["epic_id"] == 123:
+        if str(epic_id) == "123":
             # This is a special case for the demo - Epic 123 is actually Epic 1 in the dls-404 group
             logger.info("Handling special case for Epic 123 (which maps to Epic 1 in dls-404 group)")
             
             try:
+                if not self.client:
+                    return json.dumps({"error": "GitLab client not initialized"})
+                    
                 # Try to get the epic from the group instead of a project
                 groups = self.client.groups.list(search="dls-404")
                 if groups:
@@ -154,32 +211,35 @@ class GitLabActions:
                     if epics:
                         epic = epics[0]  # Get the first epic
                         
-                        # Format the response
+                        # Format the response using proper attribute access
                         epic_info = {
                             "id": epic.id,
                             "iid": epic.iid,
                             "title": epic.title,
-                            "description": epic.description,
+                            "description": getattr(epic, 'description', ''),
                             "state": epic.state,
-                            "created_at": epic.created_at,
-                            "updated_at": epic.updated_at,
+                            "created_at": getattr(epic, 'created_at', ''),
+                            "updated_at": getattr(epic, 'updated_at', ''),
                             "author": {
-                                "name": epic.author.get("name", "Unknown"),
-                                "username": epic.author.get("username", "Unknown")
+                                "name": getattr(epic.author, 'name', 'Unknown') if hasattr(epic, 'author') and epic.author else 'Unknown',
+                                "username": getattr(epic.author, 'username', 'Unknown') if hasattr(epic, 'author') and epic.author else 'Unknown'
                             },
-                            "web_url": epic.web_url
+                            "web_url": getattr(epic, 'web_url', '')
                         }
                         
                         # Get child issues
                         child_issues = []
-                        for issue in self.client.issues.list(epic_iid=epic.iid, group_id=group.id):
-                            child_issues.append({
-                                "id": issue.id,
-                                "iid": issue.iid,
-                                "title": issue.title,
-                                "state": issue.state,
-                                "web_url": issue.web_url
-                            })
+                        try:
+                            for issue in self.client.issues.list(epic_iid=epic.iid, group_id=group.id):
+                                child_issues.append({
+                                    "id": issue.id,
+                                    "iid": issue.iid,
+                                    "title": issue.title,
+                                    "state": issue.state,
+                                    "web_url": getattr(issue, 'web_url', '')
+                                })
+                        except Exception as child_error:
+                            logger.warning(f"Could not retrieve child issues: {str(child_error)}")
                         
                         epic_info["child_issues"] = child_issues
                         
@@ -193,9 +253,6 @@ class GitLabActions:
                 error_message = f"Error retrieving epic information from group: {str(e)}"
                 logger.error(error_message)
                 # Continue with the regular flow as fallback
-        
-        epic_id = context["epic_id"]
-        project_id = context["project_id"]
         
         logger.info(f"Getting information for epic {epic_id} in project {project_id}")
         
@@ -212,39 +269,48 @@ class GitLabActions:
         
         # Fall back to direct GitLab API
         try:
+            if not self.client:
+                return json.dumps({"error": "GitLab client not initialized"})
+                
+            if not project_id:
+                return json.dumps({"error": "Project ID is required for epic retrieval"})
+                
             # Get the project
             project = self.client.projects.get(project_id)
             
             # Get the epic
             epic = project.epics.get(epic_id)
             
-            # Format the response
+            # Format the response using safe attribute access
             epic_info = {
                 "id": epic.id,
                 "iid": epic.iid,
                 "title": epic.title,
-                "description": epic.description,
+                "description": getattr(epic, 'description', ''),
                 "state": epic.state,
-                "created_at": epic.created_at,
-                "updated_at": epic.updated_at,
+                "created_at": getattr(epic, 'created_at', ''),
+                "updated_at": getattr(epic, 'updated_at', ''),
                 "author": {
-                    "id": epic.author["id"],
-                    "name": epic.author["name"],
-                    "username": epic.author["username"]
+                    "id": getattr(epic.author, 'id', None) if hasattr(epic, 'author') and epic.author else None,
+                    "name": getattr(epic.author, 'name', 'Unknown') if hasattr(epic, 'author') and epic.author else 'Unknown',
+                    "username": getattr(epic.author, 'username', 'Unknown') if hasattr(epic, 'author') and epic.author else 'Unknown'
                 },
-                "web_url": epic.web_url
+                "web_url": getattr(epic, 'web_url', '')
             }
             
             # Get child issues
             child_issues = []
-            for issue in epic.issues.list(all=True):
-                child_issues.append({
-                    "id": issue.id,
-                    "iid": issue.iid,
-                    "title": issue.title,
-                    "state": issue.state,
-                    "web_url": issue.web_url
-                })
+            try:
+                for issue in epic.issues.list(all=True):
+                    child_issues.append({
+                        "id": issue.id,
+                        "iid": issue.iid,
+                        "title": issue.title,
+                        "state": issue.state,
+                        "web_url": getattr(issue, 'web_url', '')
+                    })
+            except Exception as child_error:
+                logger.warning(f"Could not retrieve child issues for epic {epic_id}: {str(child_error)}")
             
             epic_info["child_issues"] = child_issues
             
@@ -277,8 +343,9 @@ class GitLabActions:
         Returns:
             JSON string with list of open issues
         """
-        username = context["username"]
-        project_id = context.get("project_id", None)
+        # Safe context access
+        username = self._safe_context_get(context, "username")
+        project_id = self._safe_context_get(context, "project_id", None)
         
         logger.info(f"Listing open issues for user {username}")
         
@@ -299,6 +366,12 @@ class GitLabActions:
         
         # Fall back to direct GitLab API
         try:
+            if not self.client:
+                return json.dumps({"error": "GitLab client not initialized"})
+                
+            if not username:
+                return json.dumps({"error": "Username is required"})
+                
             # Get the user ID from username
             users = self.client.users.list(username=username)
             if not users:
@@ -315,8 +388,11 @@ class GitLabActions:
             
             # Get issues
             if project_id:
-                project = self.client.projects.get(project_id)
-                issues = project.issues.list(**query_params, all=True)
+                try:
+                    project = self.client.projects.get(project_id)
+                    issues = project.issues.list(**query_params, all=True)
+                except Exception as project_error:
+                    return json.dumps({"error": f"Could not access project {project_id}: {str(project_error)}"})
             else:
                 issues = self.client.issues.list(**query_params, all=True)
             
@@ -327,12 +403,12 @@ class GitLabActions:
                     "id": issue.id,
                     "iid": issue.iid,
                     "title": issue.title,
-                    "description": issue.description,
+                    "description": getattr(issue, 'description', ''),
                     "state": issue.state,
-                    "created_at": issue.created_at,
-                    "updated_at": issue.updated_at,
-                    "project_id": issue.project_id,
-                    "web_url": issue.web_url
+                    "created_at": getattr(issue, 'created_at', ''),
+                    "updated_at": getattr(issue, 'updated_at', ''),
+                    "project_id": getattr(issue, 'project_id', None),
+                    "web_url": getattr(issue, 'web_url', '')
                 })
             
             logger.info(f"Retrieved {len(issues_list)} open issues for user {username}")
@@ -372,12 +448,17 @@ class GitLabActions:
         Returns:
             JSON string with created issue information
         """
-        project_id = context["project_id"]
-        epic_id = context["epic_id"]
-        title = context["title"]
-        description = context["description"]
+        # Safe context access
+        project_id = self._safe_context_get(context, "project_id")
+        epic_id = self._safe_context_get(context, "epic_id")
+        title = self._safe_context_get(context, "title")
+        description = self._safe_context_get(context, "description")
         
         logger.info(f"Creating draft issue in project {project_id} for epic {epic_id}")
+        
+        # Validate required parameters
+        if not all([project_id, title]):
+            return json.dumps({"error": "project_id and title are required parameters"})
         
         # Try using MCP client if available
         if self.mcp_client:
@@ -385,7 +466,7 @@ class GitLabActions:
                 issue_info = self.mcp_client.create_issue(
                     project_id=project_id,
                     title=f"[DRAFT] {title}",
-                    description=description,
+                    description=description or "",
                     labels=["draft"],
                     epic_id=epic_id
                 )

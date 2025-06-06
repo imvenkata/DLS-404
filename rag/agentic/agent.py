@@ -1,4 +1,3 @@
-
 # Core agent implementation for Agentic RAG.
 import os
 import logging
@@ -135,17 +134,30 @@ class AgentRAG:
                         api_key=api_key
                     )
                 )
+                logger.info("Successfully configured kernel with newer API")
+                return
             except (AttributeError, TypeError) as e:
                 # Fall back to older API
                 logger.warning(f"Could not use newer Semantic Kernel API: {str(e)}")
-                self.kernel.config.add_azure_chat_service(
-                    service_id="ChatCompletion",
-                    deployment_name=self.openai_deployment,
-                    endpoint=self.openai_endpoint,
-                    api_key=self.openai_api_key
-                )
+                try:
+                    # Check if kernel has config attribute before using it
+                    if hasattr(self.kernel, 'config') and hasattr(self.kernel.config, 'add_azure_chat_service'):
+                        self.kernel.config.add_azure_chat_service(
+                            service_id="ChatCompletion",
+                            deployment_name=self.openai_deployment,
+                            endpoint=self.openai_endpoint,
+                            api_key=self.openai_api_key
+                        )
+                        logger.info("Successfully configured kernel with older config API")
+                        return
+                    else:
+                        logger.warning("Kernel config API not available")
+                except (AttributeError, TypeError) as config_error:
+                    logger.warning(f"Could not use older config API: {str(config_error)}")
         except Exception as e:
             logger.warning(f"Error setting up Semantic Kernel: {str(e)}")
+            
+        logger.warning("Could not configure Semantic Kernel with any known method - kernel will have limited functionality")
     
     def setup_planner(self) -> None:
         """
@@ -194,8 +206,10 @@ class AgentRAG:
                     logger.warning(f"Could not register plugin with Semantic Kernel: {str(e2)}")
             
             logger.warning(f"Could not register plugin {plugin_name} with any known method")
+            return False
         except Exception as e:
             logger.error(f"Error registering native plugin {plugin_name}: {str(e)}")
+            return False
     
     async def process_query(self, query: str) -> Dict[str, Any]:
         """
@@ -513,11 +527,14 @@ class AgentRAG:
                     
                 logger.info(f"Using Azure OpenAI base endpoint for chat: {base_endpoint}")
                 
+                # Use configurable API version instead of hardcoded value
+                api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+                
                 # Use AzureOpenAI client which handles the URL construction correctly
                 client = AzureOpenAI(
                     api_key=self.openai_api_key,
                     azure_endpoint=base_endpoint,
-                    api_version="2023-05-15"
+                    api_version=api_version
                 )
                 
                 response = client.chat.completions.create(
@@ -530,6 +547,8 @@ class AgentRAG:
                 
                 logger.info("Response generated using direct OpenAI API call")
                 return response
+            except ImportError as import_error:
+                logger.warning(f"OpenAI library not available: {str(import_error)}")
             except Exception as openai_error:
                 logger.warning(f"Direct OpenAI API call failed: {str(openai_error)}")
                 # Fall through to final fallback

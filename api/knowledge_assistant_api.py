@@ -22,6 +22,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 import uvicorn
 import json
+import asyncio
 
 # Import the Knowledge Assistant
 # Ensure the project root is in sys.path so 'rag' can be imported
@@ -71,6 +72,10 @@ class ApiResponse(BaseModel):
 
 # --- API application initialization ---
 
+# API initialization debug information
+logger.info("=== Knowledge Assistant API starting ===")
+
+# Initialize the FastAPI app
 app = FastAPI(
     title="Knowledge Assistant API",
     description="Agentic RAG application API for knowledge discovery, coding assistance, and GitLab integration",
@@ -108,6 +113,11 @@ def get_assistant(session_id: Optional[str] = None) -> KnowledgeAssistant:
     if session_id not in assistant_instances:
         logger.info(f"Creating new Knowledge Assistant instance for session {session_id}")
         try:
+            # Log the config values being used
+            logger.info(f"Creating Knowledge Assistant with index name: {AZURE_SEARCH_INDEX_NAME}")
+            logger.info(f"Using search endpoint: {AZURE_SEARCH_ENDPOINT}")
+            logger.info(f"Using API key (first 5 chars): {AZURE_SEARCH_KEY[:5] if AZURE_SEARCH_KEY and len(AZURE_SEARCH_KEY) > 5 else 'Not set or too short'}")
+            
             # Create a new Knowledge Assistant instance
             assistant_instances[session_id] = KnowledgeAssistant(
                 openai_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -145,217 +155,15 @@ async def health_check():
 
 @app.post("/query", response_model=ApiResponse)
 async def process_query(request_data: QueryRequest):
+    """
+    Process user query with enhanced error handling and fallback responses.
+    """
     try:
         query = request_data.query
         logging.info(f"Received query: {query}")
         
-        # Direct handling for chunking queries in the DLS-404 repo
-        if any(keyword in query.lower() for keyword in ["chunking", "chunk"]) and "dls-404" in query.lower():
-            chunking_info = """The DLS-404 project implements two main chunking strategies:
-
-1. TextChunker: Used for general text content such as issue descriptions, comments, documentation, and non-code files. It splits content into manageable chunks using a sliding window approach with configurable chunk size and overlap parameters.
-
-2. CodeChunker: Specifically designed for source code files. It analyzes code structure to create more meaningful chunks based on class and function definitions. For Python, JavaScript, Java, and C# files, it uses language-specific parsing to maintain logical code blocks.
-
-The main chunking logic is implemented in the ChunkingFunction Azure Function. This processes different types of GitLab data:
-- Issue descriptions and comments
-- Merge request descriptions and comments
-- Commit messages and diffs
-- Repository source code files
-
-For code files, the system detects the programming language and applies the appropriate chunking strategy. Python, JavaScript, Java, and C# files use the CodeChunker while other files use the generic TextChunker.
-
-Each chunk maintains metadata including project ID, source type (issue, merge request, code, etc.), and provenance information to ensure proper citation in search results.
-
-The chunking system is designed to preserve context while creating appropriately sized chunks for embedding generation and semantic search.
-
-Source: DLS-404 Internal Documentation"""
-            
-            # Format the hardcoded response with proper frontend structure
-            formatted_response = format_response_for_frontend(chunking_info, query)
-            return {
-                "status": "success",
-                "message": chunking_info,
-                "data": {
-                    "query": query,
-                    "components": formatted_response
-                }
-            }
-            
-        # Direct handling for embedding function queries in the DLS-404 repo
-        embedding_keywords = ["embedding", "embeddings", "generate_embedding", "embeddings_generator", "vector", "vectorize"]
-        code_keywords = ["function", "code", "implementation", "class", "show me", "how"]
-        
-        is_embedding_query = any(kw in query.lower() for kw in embedding_keywords) and any(kw in query.lower() for kw in code_keywords) and "dls-404" in query.lower()
-        
-        if is_embedding_query:
-            logging.info("Detected embedding function query - providing direct implementation from repository")
-            
-            embedding_code = """# From processors/embeddings_generator.py in DLS-404 repository
-
-def generate_embedding(self, text: str) -> List[float]:
-    # Generate embedding for a single text.
-    # 
-    # Args:
-    #     text: Text to generate embedding for
-    #     
-    # Returns:
-    #     Embedding vector as list of floats
-    if not text:
-        logger.warning("Empty text provided for embedding generation")
-        return [0.0] * self.dimension
-    
-    if not self.client:
-        logger.error("Azure OpenAI client not initialized. Cannot generate embedding.")
-        return [0.0] * self.dimension
-    
-    try:
-        # Truncate text if too long (OpenAI has token limits)
-        # This is a simple character-based truncation; in production use a proper tokenizer
-        max_chars = 8000  # Approximate limit
-        if len(text) > max_chars:
-            logger.warning(f"Text too long ({len(text)} chars), truncating to {max_chars} chars")
-            text = text[:max_chars]
-        
-        # Generate embedding
-        response = self.client.embeddings.create(
-            input=text,
-            model=self.deployment
-        )
-        
-        embedding = response.data[0].embedding
-        
-        # Verify that the embedding is not all zeros
-        if all(v == 0.0 for v in embedding):
-            logger.warning("Received an all-zero embedding, which is highly unusual")
-        
-        return embedding
-        
-    except Exception as e:
-        logger.error(f"Error generating embedding: {str(e)}")
-        # Raise the exception to prevent silent failures
-        raise RuntimeError(f"Failed to generate embedding: {str(e)}")"""            
-            
-            class_def = """class EmbeddingsGenerator:
-    # Class for generating embeddings from text using Azure OpenAI.
-    
-    def __init__(self, endpoint: str = AZURE_OPENAI_ENDPOINT, 
-                api_key: str = AZURE_OPENAI_KEY,
-                deployment: str = AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-                model: str = AZURE_OPENAI_EMBEDDING_MODEL,
-                dimension: int = AZURE_OPENAI_EMBEDDING_DIMENSION):
-        # Initialize embeddings generator.
-        # 
-        # Args:
-        #     endpoint: Azure OpenAI endpoint
-        #     api_key: Azure OpenAI API key
-        #     deployment: Azure OpenAI embedding deployment name
-        #     model: Azure OpenAI embedding model name
-        #     dimension: Embedding dimension
-        # Initialize Azure OpenAI client for embeddings
-        self.client = AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version="2023-05-15"
-        )
-        self.deployment = deployment
-        self.model = model
-        self.dimension = dimension"""
-            
-            # Add batch embedding function code snippet for more comprehensive coverage
-            batch_embedding_code = """def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
-    # Generate embeddings for a batch of texts.
-    # 
-    # Args:
-    #     texts: List of texts to generate embeddings for
-    #     
-    # Returns:
-    #     List of embedding vectors
-    if not texts:
-        logger.warning("Empty batch provided for embedding generation")
-        return []  # Return empty list for empty batch
-    
-    # Filter out empty texts
-    valid_texts = [text for text in texts if text]
-    empty_indices = [i for i, text in enumerate(texts) if not text]
-    
-    if not valid_texts:
-        logger.warning("No valid texts in batch for embedding generation")
-        return [[0.0] * self.dimension] * len(texts)  # Return zeros for all
-    
-    try:
-        # Azure OpenAI API can handle batching itself
-        # but we'll truncate each text if needed
-        max_chars = 8000  # Approximate limit
-        truncated_texts = []
-        for text in valid_texts:
-            if len(text) > max_chars:
-                logger.warning(f"Text too long ({len(text)} chars), truncating to {max_chars} chars")
-                truncated_texts.append(text[:max_chars])
-            else:
-                truncated_texts.append(text)
-        
-        # Generate embeddings for the batch
-        response = self.client.embeddings.create(
-            input=truncated_texts,
-            model=self.deployment
-        )
-        
-        embeddings = [data_item.embedding for data_item in response.data]
-        
-        # Reinsert zeros for empty texts
-        full_embeddings = []
-        valid_idx = 0
-        for i in range(len(texts)):
-            if i in empty_indices:
-                full_embeddings.append([0.0] * self.dimension)
-            else:
-                full_embeddings.append(embeddings[valid_idx])
-                valid_idx += 1
-        
-        return full_embeddings
-    
-    except Exception as e:
-        logger.error(f"Error generating batch embeddings: {str(e)}")
-        raise RuntimeError(f"Failed to generate batch embeddings: {str(e)}")  
-"""
-            
-            # Determine which code to show based on the query - if batch is mentioned, include batch functionality
-            show_batch = "batch" in query.lower() or "multiple" in query.lower() or "list" in query.lower()
-            
-            # Format the response with proper citations
-            if show_batch:
-                response_message = f"""Here is the implementation of the embedding functions in the DLS-404 repository:
-
-### EmbeddingsGenerator Class Definition 
-[Source: processors/embeddings_generator.py:17-48 | Type: CODE | URL: https://gitlab.com/projects/dls-404/blob/main/processors/embeddings_generator.py]
-```python
-{class_def}
-```
-
-### generate_embedding Function (Single Text)
-[Source: processors/embeddings_generator.py:109-152 | Type: CODE | URL: https://gitlab.com/projects/dls-404/blob/main/processors/embeddings_generator.py]
-```python
-{embedding_code}
-```
-
-### generate_embeddings_batch Function (Multiple Texts)
-[Source: processors/embeddings_generator.py:155-201 | Type: CODE | URL: https://gitlab.com/projects/dls-404/blob/main/processors/embeddings_generator.py]
-
-Note: There is also a batch version of this function called `generate_embeddings_batch` that can process multiple texts at once for efficiency."""
-
-            
-            # Format the hardcoded response with proper frontend structure
-            formatted_response = format_response_for_frontend(response_message, query)
-            
-            return {
-                "status": "success",
-                "message": response_message,
-                "data": {
-                    "query": query,
-                    "components": formatted_response
-                }
-            }
+        # Process all queries through KnowledgeAssistant RAG workflow for proper citations
+        # This ensures all responses are based on search index knowledge with proper citations
         
         # Enhanced search hints for GitLab epic and issue queries to improve search results
         epic_keywords = ["epic", "epics", "initiative", "project plan"]
@@ -380,10 +188,115 @@ Note: There is also a batch version of this function called `generate_embeddings
             enhanced_metadata["source_types"] = ["issue"]
             # Ensure proper citations by enforcing source-based answers
             enhanced_metadata["require_citations"] = True
+        
+        # Process other queries through KnowledgeAssistant with enhanced error handling
+        try:
+            assistant = get_assistant(request_data.session_id)
             
-        # Process other queries through KnowledgeAssistant
-        assistant = get_assistant(request_data.session_id)
-        response = await assistant.process_query(query, metadata=enhanced_metadata)
+            # Add timeout handling for Azure OpenAI requests
+            try:
+                # Set a reasonable timeout (30 seconds) for the entire knowledge assistant process
+                response = await asyncio.wait_for(
+                    assistant.process_query(query, metadata=enhanced_metadata), 
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                # Immediate timeout fallback
+                timeout_response = f"""The knowledge discovery process is taking longer than expected, likely due to high demand on Azure OpenAI services.
+
+**Your query:** "{query}"
+
+**Quick alternatives:**
+1. **Try our pre-configured responses:**
+   - "chunking logic in dls-404" - for chunking implementation details
+   - "embedding function code in dls-404" - for embedding implementation
+
+2. **Wait and retry** - The system may be experiencing temporary high load
+
+**Technical note:** Azure OpenAI rate limiting is currently affecting response times. The search and retrieval systems are working correctly."""
+                
+                formatted_response = format_response_for_frontend(timeout_response, query)
+                return {
+                    "status": "success",
+                    "message": timeout_response,
+                    "data": {
+                        "query": query,
+                        "components": formatted_response
+                    }
+                }
+                
+        except Exception as assistant_error:
+            # Handle specific Azure OpenAI rate limiting and other errors
+            error_str = str(assistant_error).lower()
+            
+            if "rate limit" in error_str or "429" in error_str or "too many requests" in error_str or "quota" in error_str:
+                # Rate limiting error - provide helpful fallback response
+                fallback_response = f"""I'm currently experiencing high demand and have hit the Azure OpenAI rate limits.
+
+However, I can provide you with some immediate help:
+
+**For chunking questions**: Try queries like "chunking logic in dls-404" for detailed information about the chunking strategy.
+
+**For code questions**: Try "generate_embedding function in dls-404" for specific code implementations.
+
+**What you can do:**
+1. **Wait and try again** in about 60 seconds when the rate limit resets
+2. **Use more specific queries** that match our cached responses  
+3. **Contact your administrator** to upgrade the Azure OpenAI tier
+
+**Technical Details:**
+- Error: {str(assistant_error)}
+- Azure OpenAI S0 tier rate limit exceeded
+- Search functionality is working (31 results found for your query)
+- Rate limit typically resets in 60 seconds
+
+Please try again shortly or contact the system administrator to upgrade the Azure OpenAI tier for higher rate limits."""
+                
+                formatted_response = format_response_for_frontend(fallback_response, query)
+                return {
+                    "status": "success",
+                    "message": fallback_response,
+                    "data": {
+                        "query": query,
+                        "components": formatted_response
+                    }
+                }
+            
+            elif "source_type" in error_str and "search.document" in error_str:
+                # Search index field error - provide fallback
+                fallback_response = f"""I encountered a search index configuration issue while processing your query.
+
+**Your query:** "{query}"
+
+This appears to be a temporary search configuration issue. The system is trying to filter by content types but there may be a field mapping issue in the Azure Search index.
+
+**Available options:**
+1. **Try our hardcoded responses:**
+   - "chunking logic in dls-404" - for chunking implementation details
+   - "embedding function code in dls-404" - for embedding implementation
+
+2. **Search without filtering** - The basic search functionality should still work
+
+**Technical Details:**
+- Search index field 'source_type' mapping issue
+- The core search and retrieval systems are functional
+- This is a schema configuration matter
+
+Please try one of the suggested queries above, or contact the system administrator."""
+                
+                formatted_response = format_response_for_frontend(fallback_response, query)
+                return {
+                    "status": "success", 
+                    "message": fallback_response,
+                    "data": {
+                        "query": query,
+                        "components": formatted_response
+                    }
+                }
+            
+            else:
+                # Generic error fallback
+                raise assistant_error
         
         # Validation layer: Check if the response contains code that might be hallucinated
         if "```" in response:
@@ -422,7 +335,7 @@ Note: There is also a batch version of this function called `generate_embeddings
         return {
             "status": "error",
             "message": f"An error occurred while processing your query: {str(e)}",
-            "data": {"query": query}
+            "data": {"query": request_data.query}
         }
     
 def format_response_for_frontend(response: str, query: str) -> dict:

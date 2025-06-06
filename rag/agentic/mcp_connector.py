@@ -33,7 +33,17 @@ class MCPConnector:
             base_url: Base URL of the MCP server
             api_key: API key for authentication (if required)
         """
-        self.base_url = base_url
+        # Validate and normalize base URL
+        if not base_url:
+            raise ValueError("Base URL cannot be empty")
+            
+        # Ensure base URL has proper format
+        if not base_url.startswith(('http://', 'https://')):
+            logger.warning(f"Base URL '{base_url}' doesn't start with http:// or https://")
+            base_url = f"http://{base_url}"
+            
+        # Remove trailing slash to normalize
+        self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.session = requests.Session()
         
@@ -48,7 +58,10 @@ class MCPConnector:
                 "Content-Type": "application/json"
             })
         
-        logger.info(f"MCP connector initialized for {base_url}")
+        # Set reasonable timeout
+        self.session.timeout = 30
+        
+        logger.info(f"MCP connector initialized for {self.base_url}")
     
     def list_resources(self, resource_type: str, cursor: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -61,16 +74,29 @@ class MCPConnector:
         Returns:
             Dictionary with list of resources
         """
+        if not resource_type:
+            return {"error": "Resource type cannot be empty"}
+            
         endpoint = f"/resources/{resource_type}"
         params = {"cursor": cursor} if cursor else {}
         
         try:
-            response = self.session.get(urljoin(self.base_url, endpoint), params=params)
+            url = urljoin(self.base_url, endpoint)
+            response = self.session.get(url, params=params)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection error listing resources: {str(e)}")
+            return {"error": f"Could not connect to MCP server: {str(e)}"}
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout error listing resources: {str(e)}")
+            return {"error": f"Request timed out: {str(e)}"}
         except requests.exceptions.RequestException as e:
             logger.error(f"Error listing resources: {str(e)}")
             return {"error": str(e)}
+        except ValueError as e:
+            logger.error(f"Invalid JSON response when listing resources: {str(e)}")
+            return {"error": f"Invalid response format: {str(e)}"}
     
     def get_resource(self, resource_type: str, resource_id: str) -> Dict[str, Any]:
         """
@@ -83,15 +109,30 @@ class MCPConnector:
         Returns:
             Dictionary with resource details
         """
+        if not resource_type:
+            return {"error": "Resource type cannot be empty"}
+        if not resource_id:
+            return {"error": "Resource ID cannot be empty"}
+            
         endpoint = f"/resources/{resource_type}/{resource_id}"
         
         try:
-            response = self.session.get(urljoin(self.base_url, endpoint))
+            url = urljoin(self.base_url, endpoint)
+            response = self.session.get(url)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Connection error getting resource: {str(e)}")
+            return {"error": f"Could not connect to MCP server: {str(e)}"}
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout error getting resource: {str(e)}")
+            return {"error": f"Request timed out: {str(e)}"}
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting resource: {str(e)}")
             return {"error": str(e)}
+        except ValueError as e:
+            logger.error(f"Invalid JSON response when getting resource: {str(e)}")
+            return {"error": f"Invalid response format: {str(e)}"}
     
     def search_resources(self, resource_type: str, query: str) -> Dict[str, Any]:
         """

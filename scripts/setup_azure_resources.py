@@ -5,12 +5,19 @@ import os
 import logging
 import argparse
 import json
+from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.storage import StorageManagementClient
 from azure.mgmt.search import SearchManagementClient
 from azure.mgmt.cognitiveservices import CognitiveServicesManagementClient
-from config.config import RESOURCE_GROUP, LOCATION
+
+# Load environment variables from .env file first
+load_dotenv()
+
+# Get configuration from environment with fallbacks
+RESOURCE_GROUP = os.getenv("RESOURCE_GROUP", "gitlab-rag-rg")
+LOCATION = os.getenv("LOCATION", "eastus")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -30,6 +37,10 @@ def create_resource_group(credential, subscription_id, resource_group_name, loca
         Resource group
     """
     resource_client = ResourceManagementClient(credential, subscription_id)
+    
+    # Log operations being performed
+    logger.info(f"Setting up resource group: {resource_group_name}")
+    logger.info(f"Using Azure region: {location}")
     
     # Check if resource group exists
     if any(rg.name == resource_group_name for rg in resource_client.resource_groups.list()):
@@ -218,20 +229,20 @@ def main():
     cognitive_client = CognitiveServicesManagementClient(credential, args.subscription_id)
     openai_keys = cognitive_client.accounts.list_keys(args.resource_group, args.openai_service_name)
     
-    # Create environment variables
+    # Create environment variables dictionary
     env_vars = {
         "AZURE_STORAGE_CONNECTION_STRING": storage_connection_string,
-        "AZURE_STORAGE_CONTAINER_NAME": "gitlab-data",
-        "AZURE_STORAGE_PROCESSED_CONTAINER_NAME": "gitlab-processed",
+        "AZURE_STORAGE_CONTAINER_NAME": os.getenv("AZURE_STORAGE_CONTAINER_NAME") or "gitlab-data",
+        "AZURE_STORAGE_PROCESSED_CONTAINER_NAME": os.getenv("AZURE_STORAGE_PROCESSED_CONTAINER_NAME") or "gitlab-processed",
         "AZURE_SEARCH_ENDPOINT": f"https://{args.search_service_name}.search.windows.net",
         "AZURE_SEARCH_KEY": search_keys.primary_key,
-        "AZURE_SEARCH_INDEX_NAME": "gitlab-index",
+        "AZURE_SEARCH_INDEX_NAME": os.getenv("AZURE_SEARCH_INDEX_NAME") or "gitlab-hs-index",
         "AZURE_OPENAI_ENDPOINT": f"https://{args.openai_service_name}.openai.azure.com/",
         "AZURE_OPENAI_KEY": openai_keys.key1,
-        "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-ada-002",
-        "AZURE_OPENAI_EMBEDDING_MODEL": "text-embedding-ada-002",
-        "AZURE_OPENAI_EMBEDDING_DIMENSION": "1536",
-        "AZURE_OPENAI_COMPLETION_DEPLOYMENT": "gpt-35-turbo",
+        "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT") or "text-embedding-ada-002",
+        "AZURE_OPENAI_EMBEDDING_MODEL": os.getenv("AZURE_OPENAI_EMBEDDING_MODEL") or "text-embedding-ada-002",
+        "AZURE_OPENAI_EMBEDDING_DIMENSION": os.getenv("AZURE_OPENAI_EMBEDDING_DIMENSION") or "1536",
+        "AZURE_OPENAI_COMPLETION_DEPLOYMENT": os.getenv("AZURE_OPENAI_COMPLETION_DEPLOYMENT") or "gpt-35-turbo",
         "RESOURCE_GROUP": args.resource_group,
         "LOCATION": args.location
     }

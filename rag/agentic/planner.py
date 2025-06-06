@@ -194,65 +194,201 @@ class AgentPlanner:
             )
             
             result = await self.kernel.run_async(query_analyzer)
-            analysis = json.loads(result.result)
             
-            logger.info(f"Query analyzed as type: {analysis.get('query_type')}")
-            return analysis
+            # Safe JSON parsing with fallback
+            try:
+                analysis = json.loads(result.result)
+                logger.info(f"Query analyzed as type: {analysis.get('query_type')}")
+                return analysis
+            except (json.JSONDecodeError, ValueError) as json_error:
+                logger.error(f"Failed to parse JSON response from query analyzer: {str(json_error)}")
+                logger.error(f"Raw response was: {result.result}")
+                
+                # Fallback to simple analysis based on keywords
+                return self._fallback_query_analysis(query, search_results)
+                
         except Exception as e:
-            logger.error(f"Error analyzing query: {str(e)}")
-            return {
-                "query_type": "GENERAL_QUERY",
-                "parameters": {},
-                "explanation": f"Error in query analysis: {str(e)}"
-            }
+            logger.error(f"Error during query analysis: {str(e)}")
+            # Fallback to simple analysis based on keywords
+            return self._fallback_query_analysis(query, search_results)
     
-    async def create_plan(self, query: str, query_analysis: Dict[str, Any]) -> Optional[Plan]:
+    def _fallback_query_analysis(self, query: str, search_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Create an execution plan based on the query analysis.
+        Fallback query analysis using simple keyword matching.
         
         Args:
             query: User query string
-            query_analysis: Results of query analysis
+            search_results: Retrieved documents
             
         Returns:
-            Execution plan or None if no plan could be created
+            Dictionary with query analysis results
         """
-        query_type = query_analysis.get("query_type", "GENERAL_QUERY")
-        parameters = query_analysis.get("parameters", {})
+        logger.info("Using fallback query analysis based on keywords")
         
-        logger.info(f"Creating plan for query type: {query_type}")
+        query_lower = query.lower()
         
-        # If it's a general query, no specific action plan is needed
-        if query_type == "GENERAL_QUERY":
-            logger.info("No specific action plan needed for general query")
-            return None
+        # Check for GitLab epic queries
+        if any(keyword in query_lower for keyword in ["epic", "epic 123", "epic information"]):
+            return {
+                "query_type": "GITLAB_EPIC_INFO",
+                "parameters": {
+                    "epic_id": "123",  # Default for demo
+                    "project_id": "1"  # Default project
+                },
+                "explanation": "Detected GitLab epic information request based on keywords"
+            }
         
-        # Get the required functions for this query type
-        query_type_info = self.query_types.get(query_type, {})
-        required_functions = query_type_info.get("required_functions", [])
+        # Check for user issues queries
+        if any(keyword in query_lower for keyword in ["issues assigned", "my issues", "user issues"]):
+            return {
+                "query_type": "GITLAB_USER_ISSUES", 
+                "parameters": {
+                    "username": "admin"  # Default username
+                },
+                "explanation": "Detected user issues query based on keywords"
+            }
         
-        if not required_functions:
-            logger.warning(f"No required functions defined for query type: {query_type}")
-            return None
+        # Check for chunking strategy queries
+        if any(keyword in query_lower for keyword in ["chunking", "chunk strategy", "source code chunking"]):
+            return {
+                "query_type": "GITLAB_CHUNKING_STRATEGY",
+                "parameters": {},
+                "explanation": "Detected chunking strategy query based on keywords"
+            }
         
+        # Check for Confluence queries
+        if any(keyword in query_lower for keyword in ["confluence", "wiki", "page"]):
+            return {
+                "query_type": "CONFLUENCE_SEARCH",
+                "parameters": {
+                    "query": query
+                },
+                "explanation": "Detected Confluence search query based on keywords"
+            }
+        
+        # Default to general query
+        return {
+            "query_type": "GENERAL_QUERY",
+            "parameters": {},
+            "explanation": "No specific query type detected, using general query handling"
+        }
+    
+    async def create_plan(self, query: str, search_results: List[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Create a plan for executing actions based on the query.
+        
+        Args:
+            query: User query string
+            search_results: Retrieved documents (optional)
+            
+        Returns:
+            Action plan dictionary or None if planning fails
+        """
         try:
-            # Create a plan using the action planner
-            plan_prompt = f"""
-            User Query: {query}
+            # First analyze the query if we have search results
+            if search_results is not None:
+                query_analysis = await self.analyze_query(query, search_results)
+            else:
+                # Use fallback analysis without search results
+                query_analysis = self._fallback_query_analysis(query, [])
             
-            Create a plan to address this query using the available functions.
-            The query has been classified as: {query_type} - {query_type_info.get('description', '')}
-            
-            Available parameters from query analysis:
-            {json.dumps(parameters, indent=2)}
-            """
-            
-            plan = await self.action_planner.create_plan_async(plan_prompt)
-            
-            logger.info(f"Created plan with {len(plan.steps)} steps")
-            return plan
+            return await self.create_plan_from_analysis(query, query_analysis)
         except Exception as e:
             logger.error(f"Error creating plan: {str(e)}")
+            return None
+    
+    async def create_plan_from_analysis(self, query: str, query_analysis: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Create an execution plan based on query analysis.
+        
+        Args:
+            query: User query string
+            query_analysis: Analysis results from analyze_query
+            
+        Returns:
+            Action plan dictionary or None if planning fails
+        """
+        logger.info(f"Creating plan for query type: {query_analysis.get('query_type')}")
+        
+        try:
+            query_type = query_analysis.get("query_type", "GENERAL_QUERY")
+            parameters = query_analysis.get("parameters", {})
+            
+            # Create plan based on query type
+            plan_steps = []
+            
+            if query_type == "GITLAB_EPIC_INFO":
+                plan_steps.append({
+                    "action": "get_epic_info",
+                    "parameters": {
+                        "epic_id": parameters.get("epic_id", "123"),
+                        "project_id": parameters.get("project_id", "1")
+                    }
+                })
+            
+            elif query_type == "GITLAB_USER_ISSUES":
+                plan_steps.append({
+                    "action": "list_open_issues_for_user",
+                    "parameters": {
+                        "username": parameters.get("username", "admin"),
+                        "project_id": parameters.get("project_id")
+                    }
+                })
+            
+            elif query_type == "GITLAB_CREATE_ISSUE":
+                plan_steps.append({
+                    "action": "create_draft_issue",
+                    "parameters": {
+                        "project_id": parameters.get("project_id", "1"),
+                        "epic_id": parameters.get("epic_id"),
+                        "title": parameters.get("title", "Draft Issue"),
+                        "description": parameters.get("description", "")
+                    }
+                })
+            
+            elif query_type == "GITLAB_CHUNKING_STRATEGY":
+                plan_steps.append({
+                    "action": "get_chunking_strategy",
+                    "parameters": {}
+                })
+            
+            elif query_type == "CONFLUENCE_PAGE_INFO":
+                plan_steps.append({
+                    "action": "get_confluence_page",
+                    "parameters": {
+                        "page_id": parameters.get("page_id")
+                    }
+                })
+            
+            elif query_type == "CONFLUENCE_SEARCH":
+                plan_steps.append({
+                    "action": "search_confluence",
+                    "parameters": {
+                        "query": parameters.get("query", query)
+                    }
+                })
+            
+            # For general queries, create a simple information retrieval step
+            if not plan_steps or query_type == "GENERAL_QUERY":
+                plan_steps.append({
+                    "action": "retrieve_general_information",
+                    "parameters": {
+                        "query": query
+                    }
+                })
+            
+            plan = {
+                "query": query,
+                "query_type": query_type,
+                "steps": plan_steps,
+                "explanation": query_analysis.get("explanation", "Plan created based on query analysis")
+            }
+            
+            logger.info(f"Created plan with {len(plan_steps)} steps")
+            return plan
+            
+        except Exception as e:
+            logger.error(f"Error creating plan from analysis: {str(e)}")
             return None
     
     def _create_context_from_search_results(self, search_results: List[Dict[str, Any]]) -> str:
