@@ -50,61 +50,10 @@ async def start():
     """Initialize the chat session with enhanced welcome message and quick actions."""
     global knowledge_assistant
     
-    # Welcome message with well-formatted visual boxes using markdown
+    # Welcome message with clean and simple introduction
     welcome_content = """# 🤖 AI Knowledge Assistant
 
 Welcome to your **intelligent project companion**! 
-
----
-
-## 🎯 **What I Can Help You With:**
-
-### 🔍 **Ask Questions**
-> 📖 **Search through project documentation**  
-> 🔍 **Find specific information with citations**  
-> 📊 **Explore project resources and patterns**
-
----
-
-### 📝 **Create User Stories**
-> ✍️ **Generate professional user stories**  
-> 📋 **Format with acceptance criteria**  
-> 🎯 **Create GitLab issues with templates**
-
----
-
-### 🎯 **Decompose Epics** 
-> 🔄 **Break down large epics into actionable stories**  
-> 📝 **Generate multiple user stories from descriptions**  
-> ✅ **Review and batch create issues in GitLab**
-
----
-
-### 💻 **Generate Code**
-> 🛠️ **Create code using your project's patterns**  
-> 🔄 **Generate scripts consistent with codebase**  
-> 💡 **Get implementation suggestions**
-
----
-
-### 📁 **Upload Guide**
-> 📤 **Upload files for analysis and questions**  
-> 🔗 **Integrate uploaded content with knowledge**  
-> 📈 **Extract insights from your documents**
-
----
-
-### 📋 **Create Templates**
-> 🗂️ **Generate project templates and boilerplates**  
-> 📐 **Create standardized documentation formats**  
-> 🏗️ **Build reusable code and configuration templates**
-
----
-
-### 📊 **Status Reports**
-> 📈 **Generate project progress summaries**  
-> 📋 **Create team status updates**  
-> 🎯 **Track milestone achievements and metrics**
 
 ---
 
