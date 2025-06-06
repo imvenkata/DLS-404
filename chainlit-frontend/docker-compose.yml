@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  dls-404-frontend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: dls-404-chainlit-frontend
+    ports:
+      - "8000:8000"
+    environment:
+      # Azure OpenAI Configuration
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_KEY=${AZURE_OPENAI_KEY}
+      - AZURE_OPENAI_COMPLETION_DEPLOYMENT=${AZURE_OPENAI_COMPLETION_DEPLOYMENT}
+      - AZURE_OPENAI_EMBEDDING_DEPLOYMENT=${AZURE_OPENAI_EMBEDDING_DEPLOYMENT}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION}
+      
+      # Azure Search Configuration
+      - AZURE_SEARCH_ENDPOINT=${AZURE_SEARCH_ENDPOINT}
+      - AZURE_SEARCH_KEY=${AZURE_SEARCH_KEY}
+      - AZURE_SEARCH_INDEX_NAME=${AZURE_SEARCH_INDEX_NAME}
+      
+      # GitLab Configuration
+      - GITLAB_URL=${GITLAB_URL}
+      - GITLAB_TOKEN=${GITLAB_TOKEN}
+      - GITLAB_PROJECT_ID=${GITLAB_PROJECT_ID}
+      - GITLAB_GROUP_ID=${GITLAB_GROUP_ID}
+      
+      # Optional: MCP Configuration
+      - MCP_SERVER_URL=${MCP_SERVER_URL}
+      - MCP_API_KEY=${MCP_API_KEY}
+      
+      # Chainlit Configuration
+      - CHAINLIT_HOST=0.0.0.0
+      - CHAINLIT_PORT=8000
+      
+    volumes:
+      # Mount .env file if it exists
+      - ${PWD}/.env:/app/.env:ro
+      # Mount parent directory for live development (optional)
+      # - ${PWD}/../:/app/parent:ro
+      
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # For development, enable this to see file changes
+    # command: ["chainlit", "run", "app.py", "-w", "--host", "0.0.0.0", "--port", "8000"]
+
+networks:
+  default:
+    name: dls-404-network 

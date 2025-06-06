@@ -352,14 +352,22 @@ EXAMPLE OUTPUT:
                                 labels=draft.get("labels", [])
                             )
                         else:
-                            # Fallback to enhanced actions
-                            result = self.gitlab_actions.create_user_story(
-                                epic_url=f"https://gitlab.com/groups/dls-404/-/epics/{draft.get('epic_id', '')}",
-                                role=draft["title"].split("As a ")[1].split(",")[0] if "As a " in draft["title"] else "User",
-                                action=draft["title"],
-                                benefit="achieve project goals",
-                                checklist="Standard checklist"
+                            # Use enhanced actions to actually create the issue in GitLab
+                            story_json = json.dumps({
+                                "title": draft["title"],
+                                "description": draft["description"],
+                                "epic_iid": draft.get("epic_id"),
+                                "group_path": draft["project_id"].split("/")[0] if "/" in draft["project_id"] else "dls-404"
+                            })
+                            result = self.gitlab_actions.submit_user_story(
+                                story_json=story_json,
+                                project_id=draft["project_id"]
                             )
+                            
+                            # Parse result to check for errors
+                            result_data = json.loads(result) if isinstance(result, str) else result
+                            if "error" in result_data:
+                                raise Exception(result_data["error"])
                         
                         results.append(result)
                         created_count += 1
@@ -370,7 +378,17 @@ EXAMPLE OUTPUT:
                         error_count += 1
                 
                 self.issue_agent.reset()
-                return f"✅ Batch creation complete!\n\n**Results:**\n- Successfully created: {created_count} issues\n- Failed to create: {error_count} issues\n\nAll user stories have been added to GitLab and linked to the epic."
+                
+                # Generate epic link from the first draft's context
+                epic_link = ""
+                if drafts and "epic_id" in drafts[0]:
+                    epic_id = drafts[0]["epic_id"]
+                    project_id = drafts[0].get("project_id", "dls-404/DLS-404")
+                    # Extract group name from project_id
+                    group_name = project_id.split("/")[0] if "/" in project_id else "dls-404"
+                    epic_link = f"\n\n🔗 **View Epic:** [Epic #{epic_id}](https://gitlab.com/groups/{group_name}/-/epics/{epic_id})"
+                
+                return f"✅ Batch creation complete!\n\n**Results:**\n- Successfully created: {created_count} issues\n- Failed to create: {error_count} issues\n\nAll user stories have been added to GitLab and linked to the epic.{epic_link}"
             
             elif "no" in query.lower():
                 self.issue_agent.reset()
@@ -396,10 +414,34 @@ EXAMPLE OUTPUT:
                             labels=draft.get("labels", [])
                         )
                     else:
-                        result = "Issue would be created via enhanced actions (fallback)"
+                        # Use enhanced actions to actually create the issue in GitLab
+                        story_json = json.dumps({
+                            "title": draft["title"],
+                            "description": draft["description"],
+                            "epic_iid": draft.get("epic_id"),
+                            "group_path": draft["project_id"].split("/")[0] if "/" in draft["project_id"] else "dls-404"
+                        })
+                        result = self.gitlab_actions.submit_user_story(
+                            story_json=story_json,
+                            project_id=draft["project_id"]
+                        )
+                        
+                        # Parse result to check for errors
+                        result_data = json.loads(result) if isinstance(result, str) else result
+                        if "error" in result_data:
+                            raise Exception(result_data["error"])
                     
                     self.issue_agent.reset()
-                    return f"✅ Issue created successfully!\n\n**Title:** {draft['title']}\n\nThe user story has been added to GitLab."
+                    
+                    # Generate epic link if issue is linked to an epic
+                    epic_link = ""
+                    if "epic_id" in draft and draft["epic_id"]:
+                        epic_id = draft["epic_id"]
+                        project_id = draft.get("project_id", "dls-404/DLS-404")
+                        group_name = project_id.split("/")[0] if "/" in project_id else "dls-404"
+                        epic_link = f"\n\n🔗 **View Epic:** [Epic #{epic_id}](https://gitlab.com/groups/{group_name}/-/epics/{epic_id})"
+                    
+                    return f"✅ Issue created successfully!\n\n**Title:** {draft['title']}\n\nThe user story has been added to GitLab.{epic_link}"
                     
                 except Exception as e:
                     logger.error(f"Failed to create single issue: {e}")
@@ -430,65 +472,20 @@ EXAMPLE OUTPUT:
         
         # A simple check to see if the user is providing story details directly
         has_story_details = "as a" in query.lower() and "i want to" in query.lower()
+        
+        # Check if user is asking for a specific type of story (UAT, testing, etc.)
+        specific_story_type_keywords = ["uat", "testing", "test", "qa", "quality assurance", "validation", "verification"]
+        has_specific_story_type = any(keyword in query.lower() for keyword in specific_story_type_keywords)
 
         if (epic_match or epic_url_match) and not has_story_details:
-            # --- NEW WORKFLOW: DECOMPOSE EPIC ---
             epic_iid = int(epic_match.group(1)) if epic_match else int(epic_url_match.group(1))
-            # Default group and project IDs - these should be configurable
-            group_id = "dls-404"
-            project_id = "dls-404/DLS-404"
-
-            logger.info(f"Starting epic decomposition for epic iid: {epic_iid}")
             
-            try:
-                # 1. Fetch Epic Details
-                epic_details_str = await self.kernel.invoke(
-                    plugin_name="GitLabActions", 
-                    function_name="get_epic_details", 
-                    arguments=KernelArguments(group_id=group_id, epic_iid=epic_iid)
-                )
-                
-                epic_details = json.loads(str(epic_details_str))
-                if "error" in epic_details:
-                    return f"❌ Error retrieving epic details: {epic_details['error']}"
-
-                logger.info(f"Retrieved epic: {epic_details['title']}")
-
-                # 2. Decompose Epic into Stories
-                decomp_args = KernelArguments(
-                    epic_title=epic_details['title'], 
-                    epic_description=epic_details['description'] or "No description provided"
-                )
-                story_list_str = await self.kernel.invoke(
-                    plugin_name="GitLabIssueAgent", 
-                    function_name="DecomposeEpicIntoStories", 
-                    arguments=decomp_args
-                )
-                
-                try:
-                    # Clean the response to extract JSON
-                    story_response = str(story_list_str).strip()
-                    json_match = re.search(r'\[.*\]', story_response, re.DOTALL)
-                    if json_match:
-                        json_str = json_match.group(0)
-                        decomposed_stories = json.loads(json_str)
-                    else:
-                        raise json.JSONDecodeError("No JSON array found", story_response, 0)
-                        
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error parsing decomposed stories: {e}")
-                    return f"❌ I had trouble analyzing the epic to create stories. The AI returned an invalid format. Please try again or provide a different epic."
-
-                if not decomposed_stories:
-                    return f"❌ I analyzed the epic '{epic_details['title']}' but could not identify any clear user stories to create. The epic description might need more detail."
-
-                # 3. Hand off to the issue agent to ask for batch confirmation
-                epic_context = {"project_id": project_id, "epic_id": epic_iid}
-                return self.issue_agent.start_epic_decomposition_flow(epic_context, decomposed_stories)
-                
-            except Exception as e:
-                logger.error(f"Error in epic decomposition workflow: {str(e)}")
-                return f"❌ I encountered an error while processing the epic: {str(e)}"
+            if has_specific_story_type:
+                # --- NEW WORKFLOW: CREATE SPECIFIC STORY TYPE FOR EPIC ---
+                return await self._create_specific_story_for_epic(query, epic_iid)
+            else:
+                # --- EXISTING WORKFLOW: DECOMPOSE EPIC ---
+                return await self._decompose_epic_workflow(epic_iid)
         
         elif has_story_details:
             # --- OLD WORKFLOW: CREATE SINGLE ISSUE ---
@@ -527,8 +524,168 @@ EXAMPLE OUTPUT:
    - "Create stories for epic 42"
    - "Decompose epic https://gitlab.com/groups/dls-404/-/epics/42"
 
-2. **For Single Issue:** Provide a complete user story like:
+2. **For Specific Story Types:** Be specific about what you want:
+   - "Create UAT testing story for epic 1"
+   - "Create security testing story for epic 2"
+
+3. **For Single Issue:** Provide a complete user story like:
    - "As a developer, I want to implement authentication, so that users can securely access the system" """
+
+    async def _create_specific_story_for_epic(self, query: str, epic_iid: int) -> str:
+        """Create a specific type of story for an epic based on the user's request."""
+        logger.info(f"Creating specific story type for epic {epic_iid}")
+        
+        # Default group and project IDs
+        group_id = "dls-404"
+        project_id = "dls-404/DLS-404"
+        
+        try:
+            # 1. Fetch Epic Details
+            epic_details_str = await self.kernel.invoke(
+                plugin_name="GitLabActions", 
+                function_name="get_epic_details", 
+                arguments=KernelArguments(group_id=group_id, epic_iid=epic_iid)
+            )
+            
+            epic_details = json.loads(str(epic_details_str))
+            if "error" in epic_details:
+                return f"❌ Error retrieving epic details: {epic_details['error']}"
+
+            logger.info(f"Retrieved epic: {epic_details['title']}")
+
+            # 2. Create a targeted story based on the user's request
+            story_type = "testing"
+            if "uat" in query.lower():
+                story_type = "UAT testing"
+            elif "security" in query.lower():
+                story_type = "security testing"
+            elif "performance" in query.lower():
+                story_type = "performance testing"
+            elif any(word in query.lower() for word in ["qa", "quality"]):
+                story_type = "quality assurance"
+            
+            specific_story_prompt = f"""
+Create a single, specific user story for {story_type} based on this request: "{query}"
+
+Epic context:
+- Epic Title: {epic_details['title']}
+- Epic Description: {epic_details['description'] or 'No description provided'}
+
+Generate ONE user story in this exact JSON format that focuses on {story_type}:
+{{
+    "role": "Quality Assurance Engineer",
+    "action": "design and execute {story_type} for the {epic_details['title']} functionality",
+    "benefit": "ensure the {epic_details['title']} meets all acceptance criteria and quality standards"
+}}
+
+The story should be about TESTING/VALIDATING the functionality described in the epic, NOT about implementing it.
+Focus on verification, validation, and quality assurance activities.
+"""
+            
+            # Use the kernel to generate the specific story
+            story_args = KernelArguments(
+                epic_title=epic_details['title'], 
+                epic_description=specific_story_prompt
+            )
+            story_result = await self.kernel.invoke(
+                plugin_name="GitLabIssueAgent", 
+                function_name="DecomposeEpicIntoStories", 
+                arguments=story_args
+            )
+            
+            try:
+                # Parse the generated story
+                story_response = str(story_result).strip()
+                # Look for JSON object instead of array
+                json_match = re.search(r'\{.*\}', story_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    specific_story = json.loads(json_str)
+                    # Wrap in array for consistency
+                    decomposed_stories = [specific_story]
+                else:
+                    # Fallback: try to find JSON array
+                    json_match = re.search(r'\[.*\]', story_response, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        decomposed_stories = json.loads(json_str)
+                        # Take only the first story
+                        decomposed_stories = decomposed_stories[:1]
+                    else:
+                        raise json.JSONDecodeError("No JSON found", story_response, 0)
+                        
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing specific story: {e}")
+                return f"❌ I had trouble generating the specific story. Please try rephrasing your request."
+
+            if not decomposed_stories:
+                return f"❌ I couldn't generate a specific story for your request. Please try being more specific."
+
+            # 3. Present the single story for confirmation
+            epic_context = {"project_id": project_id, "epic_id": epic_iid}
+            return self.issue_agent.start_epic_decomposition_flow(epic_context, decomposed_stories)
+            
+        except Exception as e:
+            logger.error(f"Error in specific story creation: {str(e)}")
+            return f"❌ I encountered an error while creating the specific story: {str(e)}"
+
+    async def _decompose_epic_workflow(self, epic_iid: int) -> str:
+        """Handle full epic decomposition workflow."""
+        # Default group and project IDs - these should be configurable
+        group_id = "dls-404"
+        project_id = "dls-404/DLS-404"
+
+        logger.info(f"Starting epic decomposition for epic iid: {epic_iid}")
+        
+        try:
+            # 1. Fetch Epic Details
+            epic_details_str = await self.kernel.invoke(
+                plugin_name="GitLabActions", 
+                function_name="get_epic_details", 
+                arguments=KernelArguments(group_id=group_id, epic_iid=epic_iid)
+            )
+            
+            epic_details = json.loads(str(epic_details_str))
+            if "error" in epic_details:
+                return f"❌ Error retrieving epic details: {epic_details['error']}"
+
+            logger.info(f"Retrieved epic: {epic_details['title']}")
+
+            # 2. Decompose Epic into Stories
+            decomp_args = KernelArguments(
+                epic_title=epic_details['title'], 
+                epic_description=epic_details['description'] or "No description provided"
+            )
+            story_list_str = await self.kernel.invoke(
+                plugin_name="GitLabIssueAgent", 
+                function_name="DecomposeEpicIntoStories", 
+                arguments=decomp_args
+            )
+            
+            try:
+                # Clean the response to extract JSON
+                story_response = str(story_list_str).strip()
+                json_match = re.search(r'\[.*\]', story_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    decomposed_stories = json.loads(json_str)
+                else:
+                    raise json.JSONDecodeError("No JSON array found", story_response, 0)
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing decomposed stories: {e}")
+                return f"❌ I had trouble analyzing the epic to create stories. The AI returned an invalid format. Please try again or provide a different epic."
+
+            if not decomposed_stories:
+                return f"❌ I analyzed the epic '{epic_details['title']}' but could not identify any clear user stories to create. The epic description might need more detail."
+
+            # 3. Hand off to the issue agent to ask for batch confirmation
+            epic_context = {"project_id": project_id, "epic_id": epic_iid}
+            return self.issue_agent.start_epic_decomposition_flow(epic_context, decomposed_stories)
+            
+        except Exception as e:
+            logger.error(f"Error in epic decomposition workflow: {str(e)}")
+            return f"❌ I encountered an error while processing the epic: {str(e)}"
 
     async def _process_knowledge_discovery(self, query: str, metadata: Dict[str, Any]) -> str:
         """Process a knowledge discovery query with a simplified and robust search."""
