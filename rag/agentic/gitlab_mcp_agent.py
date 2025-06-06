@@ -8,8 +8,10 @@ way to interact with GitLab.
 import os
 import logging
 import json
+import re
 from typing import Dict, List, Any, Optional, Union
 from datetime import datetime
+from collections import defaultdict
 
 import semantic_kernel as sk
 from semantic_kernel.functions import kernel_function, KernelFunction
@@ -262,5 +264,91 @@ class GitLabMCPAgent:
             return json.dumps(issues_info, indent=2)
         except Exception as e:
             error_message = f"Error listing issues: {str(e)}"
+            logger.error(error_message)
+            return json.dumps({"error": error_message})
+
+    @kernel_function
+    def get_epic_status_data(self, group_id: str, epic_iid: str) -> str:
+        """
+        Fetches and aggregates data for a specific epic, including issue counts, statuses, and unique assignees.
+        
+        Args:
+            group_id (str): The ID or path of the group (e.g., 'dls-404').
+            epic_iid (str): The internal ID (IID) of the epic.
+            
+        Returns:
+            JSON string containing epic status data
+        """
+        try:
+            epic_iid_int = int(epic_iid)
+            logger.info(f"Fetching status data for epic {epic_iid} in group {group_id}")
+            
+            # Get epic data through MCP client
+            epic_data = self.gitlab_client.get_epic_data(group_id, epic_iid_int)
+            
+            if "error" in epic_data:
+                error_message = f"Error getting epic data: {epic_data.get('error')}"
+                logger.error(error_message)
+                return json.dumps({"error": error_message})
+            
+            # Process the epic data to extract status information
+            report_data = {
+                "epic_title": epic_data.get("title", "Unknown Epic"),
+                "epic_url": epic_data.get("web_url", ""),
+                "epic_description": epic_data.get("description", ""),
+                "total_issues": 0,
+                "open_issues": 0,
+                "closed_issues": 0,
+                "assignees": set(),
+                "labels": set(),
+                "created_at": epic_data.get("created_at", ""),
+                "updated_at": epic_data.get("updated_at", "")
+            }
+            
+            # Process issues if available
+            issues = epic_data.get("issues", [])
+            report_data["total_issues"] = len(issues)
+            
+            for issue in issues:
+                issue_state = issue.get("state", "unknown")
+                if issue_state == "opened":
+                    report_data["open_issues"] += 1
+                elif issue_state == "closed":
+                    report_data["closed_issues"] += 1
+                
+                # Collect assignees
+                assignees = issue.get("assignees", [])
+                for assignee in assignees:
+                    if isinstance(assignee, dict):
+                        report_data["assignees"].add(assignee.get("username", ""))
+                    elif isinstance(assignee, str):
+                        report_data["assignees"].add(assignee)
+                
+                # Collect labels
+                labels = issue.get("labels", [])
+                for label in labels:
+                    if label:  # Ensure label is not empty
+                        report_data["labels"].add(label)
+            
+            # Convert sets to sorted lists for JSON serialization
+            report_data["assignees"] = sorted(list(filter(None, report_data["assignees"])))
+            report_data["labels"] = sorted(list(filter(None, report_data["labels"])))
+            
+            # Calculate completion percentage
+            if report_data["total_issues"] > 0:
+                completion_percentage = (report_data["closed_issues"] / report_data["total_issues"]) * 100
+                report_data["completion_percentage"] = round(completion_percentage, 1)
+            else:
+                report_data["completion_percentage"] = 0.0
+            
+            logger.info(f"Successfully processed status data for epic {epic_iid}")
+            return json.dumps(report_data, indent=2)
+            
+        except ValueError as e:
+            error_message = f"Invalid epic IID '{epic_iid}': must be a number"
+            logger.error(error_message)
+            return json.dumps({"error": error_message})
+        except Exception as e:
+            error_message = f"Failed to get status data for epic {epic_iid}: {str(e)}"
             logger.error(error_message)
             return json.dumps({"error": error_message})

@@ -301,6 +301,29 @@ class GitLabMCPClient:
         
         return self.connector.create_resource(f"{self.resource_type}_issue", data)
 
+    def get_epic_data(self, group_id: str, epic_iid: int) -> Dict[str, Any]:
+        """
+        Get comprehensive epic data including associated issues.
+        
+        Args:
+            group_id: ID or path of the group
+            epic_iid: Internal ID of the epic
+            
+        Returns:
+            Dictionary with epic and its issues data
+        """
+        try:
+            # Construct the epic identifier for the MCP server
+            epic_identifier = f"{group_id}/{epic_iid}"
+            
+            # Get epic information along with its issues
+            epic_data = self.connector.get_resource(f"{self.resource_type}_epic_full", epic_identifier)
+            
+            return epic_data
+        except Exception as e:
+            logger.error(f"Error getting epic data for {group_id}/{epic_iid}: {str(e)}")
+            return {"error": f"Failed to get epic data: {str(e)}"}
+
 
 class ConfluenceMCPClient:
     """

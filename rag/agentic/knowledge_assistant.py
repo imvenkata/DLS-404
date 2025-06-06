@@ -115,11 +115,12 @@ class KnowledgeAssistant:
 You are an AI assistant that categorizes user queries.
 User query: {{$input}}
 
-Analyze the query and select the most appropriate intent from this list: [KNOWLEDGE_DISCOVERY, ISSUE_CREATION, CODE_GENERATION, GENERAL_QUERY].
+Analyze the query and select the most appropriate intent from this list: [KNOWLEDGE_DISCOVERY, ISSUE_CREATION, CODE_GENERATION, STATUS_REPORT, GENERAL_QUERY].
 
 Intent Guidelines:
 - ISSUE_CREATION: User wants to create GitLab issues, user stories, or decompose epics. Keywords: "create issue", "user story", "epic", "as a [role] I want", "create stories", "decompose epic"
 - CODE_GENERATION: User wants to generate, create, write, or implement code. Keywords: "create", "generate", "write", "implement", "terraform", "function", "script", "code"
+- STATUS_REPORT: User wants to see progress reports, status updates, or epic summaries. Keywords: "status", "report", "progress", "summary", "epic status", "how is epic", "completion"
 - KNOWLEDGE_DISCOVERY: User wants to find information, documentation, or project details. Keywords: "what is", "how does", "explain", "charter", "documentation"
 - GENERAL_QUERY: All other queries that don't fit the above categories.
 
@@ -279,6 +280,69 @@ EXAMPLE OUTPUT:
         except Exception as e:
             logger.error(f"Failed to register epic decomposition function: {e}")
 
+        # Epic status report generation function
+        report_generation_prompt = """
+Act as a senior project manager providing a clear and concise status report.
+Based on the JSON data provided below, generate a formatted markdown report.
+
+**JSON Data:**
+{{$epic_data}}
+
+---
+**Report Format:**
+
+### Epic Status Report: [Epic Title]
+
+**Summary**
+- **Total Issues:** [Total Issues]
+- **Open Issues:** [Open Issues]  
+- **Closed Issues:** [Closed Issues]
+
+**Progress**
+- **Completion:** [Calculate and show percentage]%
+- [Create a text-based progress bar using █ and ░ characters showing completion percentage]
+
+**Contributors**
+- List all unique assignees involved in this epic (if any)
+
+**Labels**
+- List common labels used across issues (if any)
+
+**Key Takeaway**
+- Provide a brief, one-sentence summary of the epic's current state focusing on progress and next steps.
+
+**Link:**
+[View Epic on GitLab]([Epic URL])
+
+---
+**INSTRUCTIONS:**
+1. Parse the JSON data carefully
+2. Calculate completion percentage: (closed_issues / total_issues) * 100
+3. Create progress bar: For every 10% completion, use one █ character, fill remaining with ░ (total 10 characters)
+4. If no assignees or labels, state "None assigned" or "No labels"
+5. Keep the key takeaway concise and actionable
+6. Use the exact JSON field names provided
+"""
+        try:
+            report_gen_config = PromptTemplateConfig(
+                template=report_generation_prompt,
+                description="Generates a formatted status report from epic data.",
+                input_variables=[InputVariable(name="epic_data", is_required=True)],
+                execution_settings={"default": {"max_tokens": 1000}}
+            )
+            
+            report_gen_function = KernelFunction.from_prompt(
+                function_name="GenerateEpicStatusReport",
+                plugin_name="StatusReporting", 
+                prompt=report_generation_prompt,
+                prompt_template_config=report_gen_config,
+            )
+            self.kernel.add_function(plugin_name="StatusReporting", function=report_gen_function)
+            logger.info("Successfully registered epic status report generation function.")
+
+        except Exception as e:
+            logger.error(f"Failed to register epic status report function: {e}")
+
     async def process_query(self, query: str, metadata: Optional[Dict[str, Any]] = None) -> str:
         """Process a user query with improved intent routing."""
         logger.info(f"Processing query: {query}")
@@ -314,6 +378,8 @@ EXAMPLE OUTPUT:
                 return await self._process_issue_creation(query)
             elif intent == "CODE_GENERATION":
                 return await self._process_context_aware_code_generation(query)
+            elif intent == "STATUS_REPORT":
+                return await self._process_status_report_request(query)
             else: # Handles KNOWLEDGE_DISCOVERY, GENERAL_QUERY, and any other case
                 logger.info(f"Routing intent '{intent}' to knowledge discovery.")
                 return await self._process_knowledge_discovery(query, metadata)
@@ -818,3 +884,98 @@ Focus on verification, validation, and quality assurance activities.
         except Exception as e:
             logger.error(f"Error during final code generation: {e}")
             return "I failed to generate the code after retrieving context. Please try again."
+
+    async def _process_status_report_request(self, query: str) -> str:
+        """Orchestrates the fetching and generation of an epic status report."""
+        logger.info(f"Processing status report request for query: {query}")
+        
+        # A simple regex to find an epic ID and optionally a group/project
+        epic_match = re.search(r'(?:epic|epics/)\s*(\d+)', query, re.IGNORECASE)
+        
+        if not epic_match:
+            return """To generate a status report, please provide an epic ID. 
+
+**Examples:**
+- "Status report for epic 42"
+- "Generate a report for epic 1" 
+- "How is epic 5 progressing?"
+- "Show me the progress of epic 12"
+
+I'll fetch the latest data from GitLab and create a comprehensive status report."""
+            
+        epic_iid = epic_match.group(1)
+        # For simplicity, group_id is hardcoded. In a real app, this would be dynamic.
+        group_id = "dls-404"
+        logger.info(f"Starting status report for epic {epic_iid} in group {group_id}.")
+
+        # Check if we have GitLab MCP agent available
+        if not self.gitlab_mcp_agent:
+            return "❌ GitLab MCP agent is not configured. Cannot generate status reports."
+
+        try:
+            # 1. Fetch raw data using the MCP agent
+            logger.info(f"Fetching epic data for epic {epic_iid}")
+            epic_data_str = self.gitlab_mcp_agent.get_epic_status_data(
+                group_id=group_id, 
+                epic_iid=epic_iid
+            )
+            
+            # Parse the JSON response
+            epic_data = json.loads(epic_data_str)
+            if "error" in epic_data:
+                return f"❌ **Error getting epic data:** {epic_data['error']}\n\nPlease check that the epic exists and you have access to it."
+
+            # 2. Generate the report using the semantic function
+            logger.info("Generating formatted status report")
+            report_args = KernelArguments(epic_data=epic_data_str)
+            formatted_report = await self.kernel.invoke(
+                "StatusReporting", 
+                "GenerateEpicStatusReport", 
+                report_args
+            )
+            
+            if not formatted_report:
+                return "❌ Failed to generate the status report. Please try again."
+            
+            logger.info(f"Successfully generated status report for epic {epic_iid}")
+            return str(formatted_report)
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing epic data JSON: {str(e)}")
+            return f"❌ Error parsing epic data. Please try again."
+        except Exception as e:
+            logger.error(f"Error generating status report for epic {epic_iid}: {str(e)}")
+            return f"❌ **Error generating status report:** {str(e)}\n\nPlease check the epic ID and try again."
+
+    async def _retrieve_status_report_data(self) -> Dict[str, Any]:
+        """Retrieve status report data from the search index."""
+        logger.info("Retrieving status report data from the search index.")
+        
+        if not self.search_client:
+            return None
+
+        try:
+            # Implement the logic to retrieve status report data from the search index
+            # This is a placeholder and should be replaced with the actual implementation
+            # For example, you can use the search_client to search for relevant data
+            # and return it as a dictionary
+            return {}
+        except Exception as e:
+            logger.error(f"Error retrieving status report data: {str(e)}")
+            return None
+
+    async def _generate_status_report(self, data: Dict[str, Any]) -> str:
+        """Generate a status report based on the retrieved data."""
+        logger.info("Generating status report based on the retrieved data.")
+        
+        if not data:
+            return "No data found to generate a status report."
+
+        try:
+            # Implement the logic to generate a status report based on the retrieved data
+            # This is a placeholder and should be replaced with the actual implementation
+            # For example, you can use the kernel to generate a report based on the data
+            return "Status report generated successfully."
+        except Exception as e:
+            logger.error(f"Error generating status report: {str(e)}")
+            return None
