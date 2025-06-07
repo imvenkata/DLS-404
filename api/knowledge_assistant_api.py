@@ -598,12 +598,14 @@ async def status_report(request: StatusReportRequest):
         # Get or create an assistant instance
         assistant = get_assistant()
         
-        # Process status report query
-        parameters = {"project_id": request.project_id}
+        # Create the query for epic status report
         if request.epic_id:
-            parameters["epic_id"] = request.epic_id
+            query = f"Generate a status report for epic {request.epic_id}"
+        else:
+            query = f"Generate a status report for project {request.project_id}"
             
-        response = await assistant._process_status_report("Generate status report", parameters)
+        # Use the correct Epic Status Report method
+        response = await assistant._process_status_report_request(query)
         
         return ApiResponse(
             status="success",

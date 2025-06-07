@@ -33,6 +33,7 @@ from rag.agentic.gitlab_issue_agent import GitLabIssueAgent
 from search.enhanced_azure_search import EnhancedAzureSearchClient
 from processors.embeddings_generator import EmbeddingsGenerator
 from config.mcp_config import is_mcp_configured
+from rag.agentic.epic_status_agent import EpicStatusReportAgent
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -65,6 +66,10 @@ class KnowledgeAssistant:
                 logger.info("GitLab MCP agent initialized successfully")
             except Exception as e:
                 logger.warning(f"Failed to initialize GitLab MCP agent: {str(e)}")
+        
+        # Initialize Epic Status Report Agent (separate from issue creation)
+        self.epic_status_agent = EpicStatusReportAgent()
+        logger.info("Epic Status Report agent initialized")
         
         # Initialize GitLab Issue Agent for issue creation workflows
         self.issue_agent = GitLabIssueAgent()
@@ -886,66 +891,17 @@ Focus on verification, validation, and quality assurance activities.
             return "I failed to generate the code after retrieving context. Please try again."
 
     async def _process_status_report_request(self, query: str) -> str:
-        """Orchestrates the fetching and generation of an epic status report."""
+        """Process epic status report request using the dedicated Epic Status Report agent."""
         logger.info(f"Processing status report request for query: {query}")
         
-        # A simple regex to find an epic ID and optionally a group/project
-        epic_match = re.search(r'(?:epic|epics/)\s*(\d+)', query, re.IGNORECASE)
-        
-        if not epic_match:
-            return """To generate a status report, please provide an epic ID. 
-
-**Examples:**
-- "Status report for epic 42"
-- "Generate a report for epic 1" 
-- "How is epic 5 progressing?"
-- "Show me the progress of epic 12"
-
-I'll fetch the latest data from GitLab and create a comprehensive status report."""
-            
-        epic_iid = epic_match.group(1)
-        # For simplicity, group_id is hardcoded. In a real app, this would be dynamic.
-        group_id = "dls-404"
-        logger.info(f"Starting status report for epic {epic_iid} in group {group_id}.")
-
-        # Check if we have GitLab MCP agent available
-        if not self.gitlab_mcp_agent:
-            return "❌ GitLab MCP agent is not configured. Cannot generate status reports."
-
+        # Use the dedicated Epic Status Report agent
         try:
-            # 1. Fetch raw data using the MCP agent
-            logger.info(f"Fetching epic data for epic {epic_iid}")
-            epic_data_str = self.gitlab_mcp_agent.get_epic_status_data(
-                group_id=group_id, 
-                epic_iid=epic_iid
-            )
-            
-            # Parse the JSON response
-            epic_data = json.loads(epic_data_str)
-            if "error" in epic_data:
-                return f"❌ **Error getting epic data:** {epic_data['error']}\n\nPlease check that the epic exists and you have access to it."
-
-            # 2. Generate the report using the semantic function
-            logger.info("Generating formatted status report")
-            report_args = KernelArguments(epic_data=epic_data_str)
-            formatted_report = await self.kernel.invoke(
-                "StatusReporting", 
-                "GenerateEpicStatusReport", 
-                report_args
-            )
-            
-            if not formatted_report:
-                return "❌ Failed to generate the status report. Please try again."
-            
-            logger.info(f"Successfully generated status report for epic {epic_iid}")
-            return str(formatted_report)
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing epic data JSON: {str(e)}")
-            return f"❌ Error parsing epic data. Please try again."
+            report = self.epic_status_agent.generate_epic_status_report(query)
+            logger.info("Successfully generated epic status report")
+            return report
         except Exception as e:
-            logger.error(f"Error generating status report for epic {epic_iid}: {str(e)}")
-            return f"❌ **Error generating status report:** {str(e)}\n\nPlease check the epic ID and try again."
+            logger.error(f"Error processing status report request: {str(e)}")
+            return f"❌ **Error generating status report:** {str(e)}\n\nPlease try again."
 
     async def _retrieve_status_report_data(self) -> Dict[str, Any]:
         """Retrieve status report data from the search index."""
