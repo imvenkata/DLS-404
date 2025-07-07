@@ -93,3 +93,6 @@ yarn-error.log*
 
 # Project specific
 uv.lock
+
+
+chainlit-frontend/.chainlit

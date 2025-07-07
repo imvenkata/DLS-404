@@ -1,3 +1,5 @@
+# DevPod template for ML workflows
+
 /// .devcontainer/devcontainer.json
 {
   "name": "Fraud Detection Model Development Environment (Enhanced)",
