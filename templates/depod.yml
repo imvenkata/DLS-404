@@ -1,0 +1,104 @@
+/// .devcontainer/devcontainer.json
+{
+  "name": "Fraud Detection Model Development Environment (Enhanced)",
+  // Use a custom Dockerfile for building the image.
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+
+  // Features to add to the container.
+  // common-utils includes useful tools like zsh, oh-my-zsh, and package upgrades.
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": "true",
+      "installOhMyZsh": "true",
+      "upgradePackages": "true"
+    },
+    // Docker-in-Docker for local container development and testing (e.g., building model images)
+    "ghcr.io/devcontainers/features/docker-in-docker:1": {},
+    // Azure CLI for interacting with Azure resources (e.g., Azure ML, Azure Data Lake, Azure Key Vault)
+    "ghcr.io/devcontainers/features/azure-cli:1": {},
+    // Optional: Add other cloud CLIs if your bank uses a multi-cloud strategy
+    // "ghcr.io/devcontainers/features/aws-cli:1": {},
+    // "ghcr.io/devcontainers/features/google-cloud-cli:1": {}
+  },
+
+  // Use 'postCreateCommand' to run commands after the container is created.
+  // This is ideal for installing project-specific dependencies and setting up tools.
+  "postCreateCommand": "pip install --no-cache-dir -r requirements.txt && echo 'Additional setup for banking-specific tools or data access can go here.' && echo 'Consider adding Azure login (az login) or environment variable setup for service principals here.'",
+
+  // Configure VS Code specific settings and extensions.
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.pythonPath": "/usr/local/bin/python",
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        // Ensure proper line endings for cross-platform development
+        "files.eol": "\n",
+        // Disable telemetry for privacy/compliance (adjust as per corporate policy)
+        "telemetry.enableTelemetry": false,
+        // Python specific settings for better development experience
+        "python.languageServer": "Pylance", // Recommend Pylance for better intellisense
+        "python.analysis.typeCheckingMode": "basic"
+      },
+      // List of VS Code extensions to install automatically.
+      "extensions": [
+        "ms-python.python",              // Core Python development
+        "ms-toolsai.jupyter",           // Jupyter notebooks for experimentation and data exploration
+        "GitHub.copilot",               // AI assistant for code generation (if enabled)
+        "ms-azuretools.vscode-docker",  // Docker management within VS Code
+        "eamodio.gitlens",              // Enhanced Git capabilities for Git history and blame
+        "esbenp.prettier-vscode",       // Code formatter for consistent styling
+        "ms-vscode.remote-explorer",    // For managing remote connections
+        "ms-mssql.mssql",               // SQL Server tools for database interaction (common in banking)
+        "redhat.vscode-yaml",           // YAML linting and validation (for Kubernetes, CI/CD configs, GitLab CI)
+        "hashicorp.terraform",          // Terraform for Infrastructure as Code (if applicable)
+        "donjayamanne.githistory",      // Visual Git history
+        "vscode-icons.vscode-icons",    // Better file icons for clarity
+
+        // Azure-specific extensions for banking ML workflows
+        "ms-azuretools.vscode-azureaccount",    // Azure Account extension
+        "ms-azuretools.vscode-azurecli",        // Azure CLI extension
+        "ms-azuretools.vscode-azuremachinelearning", // Azure Machine Learning extension for managing workspaces, experiments, models
+        "ms-azuretools.vscode-azurefunctions",  // If using Azure Functions for model serving or data processing
+        "ms-azuretools.vscode-azurestorage",    // For interacting with Azure Blob Storage, Data Lake Storage
+
+        // Monitoring & Observability related extensions (for interacting with services)
+        "ms-azuretools.vscode-azuremonitor",    // Azure Monitor extension for viewing logs and metrics
+        "redhat.vscode-openshift-connector",    // If using OpenShift/Kubernetes for deployment, helps with cluster interaction
+        "promlabs.vscode-prometheus",           // If using Prometheus for metrics collection
+
+        // ML Model Lifecycle & Development Speed-up
+        "Iterative.dvc",                // Data Version Control (DVC) for managing large datasets and models
+        "ms-python.vscode-pylance",     // Pylance for enhanced Python IntelliSense and type checking
+        "charliermarsh.ruff",           // Fast Python linter and formatter
+        "ms-python.black-formatter",    // Black formatter integration
+        "sourcery.sourcery",            // AI-powered code refactoring (review corporate policy)
+        "ms-vscode.live-server",        // For quickly serving local web content (e.g., Streamlit apps)
+        "ms-python.isort"               // Import sorter
+      ]
+    }
+  },
+
+  // Forward ports from the container to the local machine.
+  // Useful if your model has a local API for testing (e.g., Flask, FastAPI, Streamlit).
+  "forwardPorts": [5000, 8501], // Example: 5000 for Flask/FastAPI, 8501 for Streamlit
+
+  // Mount volumes for persistent data or external resources.
+  // In banking, this might be for large datasets, secure credentials, or shared resources.
+  // Ensure sensitive data is handled securely and not directly mounted without encryption/access control.
+  // "mounts": [
+  //   "source=/path/to/your/local/data,target=/workspaces/fraud-detection-model/data,type=bind,consistency=cached",
+  //   "source=/path/to/your/local/credentials,target=/home/vscode/.azure,type=bind,consistency=cached" // Example for Azure credentials
+  // ],
+
+  // Specify a workspace folder if your repository is not at the root of the container.
+  // "workspaceFolder": "/workspaces/fraud-detection-model",
+
+  // Remote user to use when connecting to the container.
+  "remoteUser": "vscode"
+}
