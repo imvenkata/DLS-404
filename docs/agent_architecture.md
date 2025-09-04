@@ -61,6 +61,17 @@ The system employs multiple specialized agents, each handling specific domains:
   - Technical question answering with GitLab context
   - Status report generation
 
+#### **MRReviewAgent** (`mr_review_agent.py`) - **WIP**
+- **Purpose**: Automated merge request review and analysis
+- **Planned Capabilities**:
+  - Code quality assessment and scoring
+  - Security vulnerability detection
+  - Performance impact analysis
+  - Automated review comments generation
+  - Integration with GitLab merge request workflows
+  - Customizable review policies and rules
+  - Review history and analytics
+
 ### 3. MCP (Model Context Protocol) Integration
 
 #### **MCPConnector** (`mcp_connector.py`)
@@ -540,6 +551,7 @@ MCP_API_KEY=your_mcp_api_key
 3. **Performance Optimization**: Caching and optimization strategies
 4. **Enhanced Monitoring**: Comprehensive system health and performance monitoring
 5. **API Gateway**: Centralized API management and rate limiting
+6. **MR Review Agent**: Automated merge request review and analysis system
 
 ### Extension Points
 
@@ -547,6 +559,50 @@ MCP_API_KEY=your_mcp_api_key
 2. **Custom Plugins**: User-defined semantic plugins
 3. **Integration APIs**: Standardized interfaces for external systems
 4. **Workflow Engine**: Visual workflow design and management
+
+### MR Review Agent (Work in Progress)
+
+The **MRReviewAgent** is a planned specialized agent that will provide automated merge request review capabilities:
+
+#### **Planned Features**
+- **Code Quality Assessment**: Automated code review with quality scoring
+- **Security Analysis**: Vulnerability detection and security best practices checking
+- **Performance Impact Analysis**: Code change impact assessment
+- **Automated Comments**: AI-generated review comments and suggestions
+- **GitLab Integration**: Seamless integration with GitLab merge request workflows
+- **Customizable Policies**: Configurable review rules and thresholds
+- **Review Analytics**: Historical review data and trend analysis
+
+#### **Technical Architecture**
+```python
+class MRReviewAgent:
+    def __init__(self):
+        self.code_analyzer = CodeQualityAnalyzer()
+        self.security_scanner = SecurityVulnerabilityScanner()
+        self.performance_analyzer = PerformanceImpactAnalyzer()
+        self.review_policies = ReviewPolicyManager()
+    
+    async def review_merge_request(self, mr_url: str, policies: Dict[str, Any]) -> ReviewResult:
+        # Analyze code changes
+        # Check security vulnerabilities
+        # Assess performance impact
+        # Generate review comments
+        # Return comprehensive review result
+```
+
+#### **Integration Points**
+- **GitLab API**: Direct integration with merge request data
+- **Code Analysis Tools**: Integration with static analysis tools
+- **Security Scanners**: Vulnerability detection services
+- **Performance Monitoring**: Code change impact analysis
+- **Review Workflow**: Integration with existing review processes
+
+#### **Benefits**
+- **Consistency**: Standardized review process across all merge requests
+- **Efficiency**: Reduced manual review time and effort
+- **Quality**: Improved code quality through automated checks
+- **Security**: Early detection of security vulnerabilities
+- **Compliance**: Enforced review policies and standards
 
 ## Conclusion
 
@@ -557,4 +613,3 @@ The agentic RAG system represents a significant evolution beyond traditional RAG
 - **Resilient Architecture**: Multiple fallback mechanisms and graceful degradation
 - **Extensible Design**: Easy addition of new capabilities and integrations
 
-This architecture transforms the system from a simple question-answering tool into an intelligent, action-oriented assistant that can understand complex user needs, execute sophisticated workflows, and provide comprehensive solutions for GitLab project management and knowledge discovery.
