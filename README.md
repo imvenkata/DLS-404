@@ -30,55 +30,89 @@ This repository contains a modular implementation of a Retrieval-Augmented Gener
 
 ```
 DLS-404/
-├── config/
+├── api/                          # API layer
+│   ├── __init__.py
+│   ├── knowledge_assistant_api.py # Knowledge assistant API
+│   ├── router.py                 # API routing
+│   ├── requirements.txt          # API dependencies
+│   └── README.md                 # API documentation
+├── chainlit-frontend/            # Chainlit-based frontend
+│   ├── app.py                    # Main Chainlit application
+│   ├── enhanced_app.py           # Enhanced version with additional features
+│   ├── demo.py                   # Demo application
+│   ├── requirements.txt          # Frontend dependencies
+│   ├── Dockerfile                # Docker configuration
+│   ├── docker-compose.yml        # Docker compose setup
+├── config/                       # Configuration management
 │   ├── config.py                 # Central configuration module
-│   └── extractor_config.json     # Configuration for enabled extractors
-├── extractors/
+│   ├── extractor_config.json     # Configuration for enabled extractors
+│   └── mcp_config.py             # MCP (Model Context Protocol) configuration
+├── extractors/                   # Data extraction modules
 │   ├── __init__.py
 │   ├── gitlab_extractor.py       # Base GitLab extractor class
-│   ├── issues_extractor.py       # Issues and epics extractor
+│   ├── enhanced_issues_extractor.py # Enhanced issues and epics extractor
 │   ├── merge_requests_extractor.py # Merge requests extractor
 │   ├── commits_extractor.py      # Commits extractor
 │   └── code_extractor.py         # Repository code extractor
-├── processors/
+├── processors/                    # Data processing modules
 │   ├── __init__.py
-│   ├── text_chunker.py           # Text chunking logic
-│   ├── code_chunker.py           # Code-specific chunking logic
-│   └── embeddings_generator.py   # Embedding generation with Azure OpenAI
-├── storage/
+│   ├── improved_text_chunker.py  # Enhanced text chunking logic
+│   └── improved_code_chunker.py  # Enhanced code-specific chunking logic
+├── storage/                       # Storage layer
 │   ├── __init__.py
-│   └── blob_storage.py           # Azure Blob Storage integration
-├── search/
+│   ├── blob_storage.py           # Azure Blob Storage integration
+├── search/                        # Search functionality
 │   ├── __init__.py
-│   └── azure_search.py           # Azure AI Search integration
-├── rag/
+│   ├── azure_search.py           # Azure AI Search integration
+│   └── enhanced_azure_search.py  # Enhanced search implementation
+├── rag/                          # RAG (Retrieval-Augmented Generation) system
 │   ├── __init__.py
-│   ├── rag_pipeline.py           # RAG pipeline implementation
 │   └── agentic/                  # Agentic RAG components
 │       ├── __init__.py
-│       ├── agent.py              # AgentRAG implementation
-│       ├── actions.py            # GitLab and Confluence actions
-│       └── planner.py            # Action planning for queries
-├── api/
-│   ├── __init__.py
-│   ├── main.py                   # FastAPI application
-│   └── router.py                 # API endpoints
-├── tools/                        # Utility tools
+│       ├── epic_status_agent.py  # Epic status reporting agent
+│       ├── gitlab_auth.py        # GitLab authentication
+│       ├── gitlab_mcp_agent.py   # MCP-based GitLab agent
+│       ├── knowledge_assistant.py # Knowledge assistant implementation
+│       ├── mcp_connector.py      # MCP protocol connector
+│       ├── README.md             # Agentic RAG documentation
+│       └── plugins/              # Semantic plugins
+│           └── semantic/         # Semantic processing plugins
+│               ├── extract_info/ # Information extraction plugin
+│               │   ├── config.json
+│               │   └── skprompt.txt
+│               └── summarize/    # Summarization plugin
+│                   ├── config.json
+│                   └── skprompt.txt
+├── tools/                         # Utility tools and scripts
 │   ├── configure_extractors.py   # Tool to enable/disable extractors
 │   ├── extraction_manager.py     # Extraction pipeline manager
-│   ├── query_rag.py              # Simple RAG query tool
-│   ├── run_optimized_pipeline.py # Optimized pipeline without commits
-│   ├── run_rag_service.py        # Web interface for RAG service
-│   └── templates/                # HTML templates for web interface
-├── scripts/                      # Core scripts
-│   ├── cleanup_repo.py           # Repository cleanup utility
+│   ├── run_optimized_pipeline.py # Optimized pipeline execution
+│   └── templates/                # HTML templates
+│       └── index.html            # Main template
+├── scripts/                       # Core scripts and utilities
 │   ├── create_azure_search_index.py # Index creation script
+│   ├── demo_epic_status_report.py # Demo for epic status reporting
 │   ├── initialize_pipeline.py    # Pipeline initialization
-│   ├── run_agentic_rag.py        # Run agentic RAG system
+│   ├── list_azure_search_resources.py # List Azure search resources
+│   ├── purge_and_reindex.py      # Purge and reindex functionality
+│   ├── quick_search_test.py      # Quick search testing
+│   ├── run_knowledge_assistant_api.py # Run knowledge assistant API
 │   ├── setup_azure_resources.py  # Azure resource setup
-│   └── test_rag_system.py        # Test system for RAG
-└── docs/                         # Documentation
-    └── agentic_rag_improvements.md # Agentic RAG system improvements
+│   └── verify_index.py           # Index verification utility
+├── docs/                          # Documentation
+│   ├── agentic_rag_improvements.md # Agentic RAG system improvements
+│   ├── chunking_system.md        # Chunking system documentation
+│   ├── embedding_system.md       # Embedding system documentation
+│   ├── EPIC_STATUS_REPORT_AGENT.md # Epic status report agent docs
+│   ├── extractors.md             # Extractors documentation
+│   ├── gitlab_mcp_agent.md       # GitLab MCP agent documentation
+│   ├── knowledge_assistant.md    # Knowledge assistant documentation
+│   └── README.md                 # Documentation index
+├── postman/                       # API testing
+│   └── gitlab_rag_knowledge_assistant.postman_collection.json # Postman collection
+├── knowledge_assistant_main.py    # Main knowledge assistant entry point
+├── pyproject.toml                # Project configuration
+└── requirements.txt               # Project dependencies
 ```
 
 ## Features
