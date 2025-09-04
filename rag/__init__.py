@@ -7,20 +7,37 @@ This package focuses on the agentic RAG implementation using Semantic Kernel.
 __all__ = []
 
 try:
-    from .agentic.agent import AgentRAG
-    __all__.append('AgentRAG')
+    from .agentic.knowledge_assistant import KnowledgeAssistant
+    __all__.append('KnowledgeAssistant')
 except ImportError as e:
     import logging
-    logging.warning(f"Could not import AgentRAG: {str(e)}")
+    logging.warning(f"Could not import KnowledgeAssistant: {str(e)}")
 
 try:
-    from .agentic.actions import GitLabActions, ConfluenceActions
-    __all__.extend(['GitLabActions', 'ConfluenceActions'])
+    from .agentic.gitlab_enhanced import GitLabEnhancedActions
+    __all__.extend(['GitLabEnhancedActions'])
 except ImportError as e:
     import logging
-    logging.warning(f"Could not import actions: {str(e)}")
+    logging.warning(f"Could not import GitLabEnhancedActions: {str(e)}")
+
+try:
+    from .agentic.gitlab_issue_agent import GitLabIssueAgent
+    __all__.append('GitLabIssueAgent')
+except ImportError as e:
+    import logging
+    logging.warning(f"Could not import GitLabIssueAgent: {str(e)}")
+
+try:
+    from .agentic.epic_status_agent import EpicStatusReportAgent
+    __all__.append('EpicStatusReportAgent')
+except ImportError as e:
+    import logging
+    logging.warning(f"Could not import EpicStatusReportAgent: {str(e)}")
 
 # Ensure we have at least an empty list
 if not __all__:
     import logging
     logging.warning("No RAG components could be imported - check dependencies")
+else:
+    import logging
+    logging.info(f"Successfully imported RAG components: {', '.join(__all__)}")

@@ -51,9 +51,11 @@ async def start():
     global knowledge_assistant
     
     # Welcome message with clean and simple introduction
-    welcome_content = """# 🤖 AI Knowledge Assistant
+    welcome_content = """# 🤖 Eureka
 
-Welcome to your **intelligent project companion**!"""
+Welcome to your **project companion**! 
+
+Find and generate information to improve developer productivity"""
 
     await cl.Message(
         content=welcome_content,

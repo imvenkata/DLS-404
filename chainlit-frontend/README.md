@@ -111,7 +111,7 @@ chainlit run demo.py -w --host 0.0.0.0 --port 3000
 ```
 
 #### 📱 **Basic App** (Core Features)
-Standard knowledge assistant with GitLab integration:
+Standard knowledge assistant xwith GitLab integration:
 ```bash
 chainlit run app.py -w --host 0.0.0.0 --port 3000
 ```

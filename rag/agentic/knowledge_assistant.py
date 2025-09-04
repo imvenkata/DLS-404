@@ -102,7 +102,7 @@ class KnowledgeAssistant:
             )
             logger.info(f"Added Azure OpenAI chat service with deployment {self.openai_deployment}")
             
-            self.kernel.add_plugin(self.gitlab_actions, "GitLabActions")
+            self.kernel.add_plugin(self.gitlab_actions, "GitLabEnhancedActions")
             logger.info("Registered GitLab enhanced actions plugin")
             
             self._register_semantic_functions()
@@ -613,7 +613,7 @@ Based on the JSON data provided below, generate a formatted markdown report.
         try:
             # 1. Fetch Epic Details
             epic_details_str = await self.kernel.invoke(
-                plugin_name="GitLabActions", 
+                plugin_name="GitLabEnhancedActions", 
                 function_name="get_epic_details", 
                 arguments=KernelArguments(group_id=group_id, epic_iid=epic_iid)
             )
@@ -711,7 +711,7 @@ Focus on verification, validation, and quality assurance activities.
         try:
             # 1. Fetch Epic Details
             epic_details_str = await self.kernel.invoke(
-                plugin_name="GitLabActions", 
+                plugin_name="GitLabEnhancedActions", 
                 function_name="get_epic_details", 
                 arguments=KernelArguments(group_id=group_id, epic_iid=epic_iid)
             )
