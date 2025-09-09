@@ -9,8 +9,18 @@ This documentation provides a comprehensive overview of the DLS-404 GitLab RAG (
 3. [Components](#components)
 4. [Setup and Installation](#setup-and-installation)
 5. [Usage](#usage)
-6. [Advanced Topics](#advanced-topics)
-7. [Troubleshooting](#troubleshooting)
+6. [API Documentation](#api-documentation)
+7. [Advanced Topics](#advanced-topics)
+8. [Troubleshooting](#troubleshooting)
+
+## API Documentation
+
+- **[🔍 Hybrid Search API Guide](./hybrid_search_api.md)** - Complete guide for the intelligent search API
+- [Agentic RAG Improvements](./agentic_rag_improvements.md)
+- [Agent Architecture](./agent_architecture.md)
+- [Extractors](./extractors.md)
+- [Chunking System](./chunking_system.md)
+- [Embedding System](./embedding_system.md)
 
 ## Introduction
 
@@ -159,10 +169,28 @@ python scripts/update_chunks.py
 
 ### Using the API
 
-The API provides endpoints for searching and retrieving content:
+The system provides multiple APIs for different use cases:
+
+#### **Hybrid Search API (Recommended)**
+
+Advanced search API with keyword, vector, and hybrid search capabilities:
 
 ```bash
-# Start the API server
+# Start the hybrid search API server
+python api/hybrid_search_api.py
+
+# Access the API at http://localhost:5000
+# API Documentation: http://localhost:5000/docs
+```
+
+**[📖 Complete Hybrid Search API Guide](./hybrid_search_api.md)**
+
+#### **Basic API**
+
+Simple API for basic search functionality:
+
+```bash
+# Start the basic API server
 python api/main.py
 
 # Access the API at http://localhost:8000

@@ -1,8 +1,6 @@
 """
-API package for FastAPI implementation.
+API package for Code Search implementation.
 """
-from .router import router
 
-__all__ = [
-    'router'
-]
+# No imports needed for the focused code search API
+__all__ = []

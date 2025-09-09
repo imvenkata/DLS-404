@@ -468,8 +468,10 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
     text_chunker = ImprovedTextChunker()
     logger.info("ImprovedTextChunker initialized successfully")
     
-    code_chunker = ImprovedCodeChunker()
-    logger.info("ImprovedCodeChunker initialized successfully")
+    # Use EnhancedCodeChunkerV2 for better metadata
+    from processors.enhanced_code_chunker_v2 import EnhancedCodeChunkerV2
+    code_chunker = EnhancedCodeChunkerV2()
+    logger.info("EnhancedCodeChunkerV2 initialized successfully")
     
     logger.info("Initializing EmbeddingsGenerator...")
     embeddings_generator = EmbeddingsGenerator() # Initialize early
@@ -643,7 +645,8 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                         log_id = f"{project_id}/code/{file_path}"
                         
                         if language in ['python', 'javascript', 'java', 'csharp', 'jsx', 'ts', 'tsx']:
-                            current_item_chunks = code_chunker.chunk_code(file_data['content'], metadata)
+                            # Use enhanced chunking method for better metadata
+                            current_item_chunks = code_chunker.chunk_code_enhanced(file_data['content'], metadata)
                         elif language in ['markdown', 'text', 'json', 'yaml', 'html', 'css']:
                             current_item_chunks = text_chunker.chunk_text(file_data['content'], metadata)
                         else:

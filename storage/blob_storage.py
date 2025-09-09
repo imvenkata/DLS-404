@@ -334,3 +334,38 @@ class BlobStorage:
             return "sanitized_empty_filename"
             
         return sanitized
+
+    def list_blobs(self, container_name: str = None, prefix: str = None) -> List[str]:
+        """
+        List all blobs in the specified container.
+        
+        Args:
+            container_name: Container name ('raw' for raw container, 'processed' for processed container, or None for raw)
+            prefix: Optional prefix to filter blobs
+            
+        Returns:
+            List[str]: List of blob names
+        """
+        try:
+            # Determine which container to use
+            if container_name == 'processed':
+                container_client = self.processed_container_client
+                container_name_str = self.processed_container_name
+            else:
+                container_client = self.raw_container_client
+                container_name_str = self.raw_container_name
+            
+            if not container_client:
+                logger.error(f"Container client not initialized for: {container_name_str}")
+                return []
+            
+            blobs = []
+            for blob in container_client.list_blobs(name_starts_with=prefix):
+                blobs.append(blob.name)
+            
+            logger.info(f"Listed {len(blobs)} blobs from container: {container_name_str}")
+            return blobs
+            
+        except Exception as e:
+            logger.error(f"Failed to list blobs: {str(e)}")
+            return []

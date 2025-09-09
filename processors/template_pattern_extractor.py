@@ -217,7 +217,7 @@ class TemplatePatternExtractor:
                 name=f"github_reusable_workflow",
                 type='cicd',
                 category='github_reusable_workflow',
-                content=content := file_data.get('content', ''),
+                content=file_data.get('content', ''),
                 variables=self._extract_yaml_variables(parsed_content),
                 parameters=parsed_content.get('on', {}).get('workflow_call', {}).get('inputs', {}),
                 usage_examples=[file_path],
