@@ -1,13 +1,13 @@
 {
     "extractors": {
-        "issues": true,
+        "issues": false,
         "merge_requests": false,
         "commits": false,
         "code": true,
-        "epics": true
+        "epics": false
     },
     "processors": {
-        "text_chunker": true,
+        "text_chunker": false,
         "code_chunker": true
     }
 }

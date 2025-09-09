@@ -1,54 +1,114 @@
-# GitLab RAG Application with Azure Services
+# 🤖 Agentic AI Coding Assistant with GitLab RAG
 
-This repository contains a modular implementation of a Retrieval-Augmented Generation (RAG) application that uses GitLab data sources and Azure services. The application includes both standard RAG capabilities and an enhanced agentic RAG system that can take actions based on user queries.
+This repository contains a **company-specific agentic AI coding assistant** that works like **GitHub Copilot or Cursor but trained on your organization's codebase**. It uses GitLab data sources and Azure services to provide intelligent code suggestions, explanations, and assistance based on your actual code patterns and practices.
 
-## Latest Updates
+## 🎯 **Core Workflow: Extract → Chunk → Embed → Retrieve → Generate**
 
-- **Semantic Kernel 1.32.0 Compatibility**: The codebase has been updated to work with Semantic Kernel 1.32.0, addressing breaking changes from previous versions.
-- **Enhanced Issue Creation Workflow**: Added a multi-step workflow for creating GitLab issues with draft review and confirmation steps.
-- **Enhanced Query Intent Recognition**: Improved intent recognition to detect both user intent (technical question, issue creation, etc.) and content type (code, issue, merge request, epic).
-- **Content Type-Based Search Filtering**: Added intelligent filtering of search results based on detected content type to improve response relevance.
+1. **Extract** code and data from your GitLab repositories
+2. **Chunk** code into semantically meaningful pieces with rich metadata  
+3. **Embed** chunks using vector embeddings for intelligent search
+4. **Retrieve** relevant context based on coding queries
+5. **Generate** company-specific code suggestions and answers using AI
 
-## Table of Contents
+## 🚀 **Latest Updates**
 
-- [GitLab RAG Application with Azure Services](#gitlab-rag-application-with-azure-services)
-  - [Latest Updates](#latest-updates)
-  - [Table of Contents](#table-of-contents)
-  - [Project Structure](#project-structure)
-  - [Features](#features)
-  - [Prerequisites](#prerequisites)
-  - [Setup](#setup)
-  - [Usage](#usage)
-    - [Data Extraction and Indexing](#data-extraction-and-indexing)
+- **🤖 Agentic AI Coding Assistant**: Complete refactor into a general-purpose coding assistant similar to GitHub Copilot but company-specific
+- **💡 Code Completion**: Intelligent code completion based on company patterns and practices  
+- **📖 Code Explanation**: AI-powered code explanations with references to similar company code
+- **🎯 Smart Query Processing**: Ask any coding question and get intelligent answers based on company codebase
+- **🔍 Semantic Code Search**: Find code by functionality and intent, not just text matching
+- **🧠 Company Context Intelligence**: Learns and applies your organization's coding standards and patterns
+- **⚡ REST API Interface**: Easy integration with any development tool or IDE
+- **🔄 Real-time Embedding Workflow**: Automatic extraction, chunking, embedding, and retrieval pipeline
+
+## 📋 **Table of Contents**
+
+- [🤖 Agentic AI Coding Assistant with GitLab RAG](#-agentic-ai-coding-assistant-with-gitlab-rag)
+  - [🎯 **Core Workflow: Extract → Chunk → Embed → Retrieve → Generate**](#-core-workflow-extract--chunk--embed--retrieve--generate)
+  - [🚀 **Latest Updates**](#-latest-updates)
+  - [📋 **Table of Contents**](#-table-of-contents)
+  - [🎯 **What You Get**](#-what-you-get)
+    - [**💬 GitHub Copilot-like Experience**](#-github-copilot-like-experience)
+    - [**🧠 Company-Specific Intelligence**](#-company-specific-intelligence)
+    - [**🔍 Smart Code Discovery**](#-smart-code-discovery)
+    - [**⚡ Developer-Friendly API**](#-developer-friendly-api)
+  - [🏗️ **Project Structure**](#️-project-structure)
+  - [✨ **Features**](#-features)
+    - [**🤖 Agentic AI Capabilities**](#-agentic-ai-capabilities)
+    - [**🧠 Advanced Code Understanding**](#-advanced-code-understanding)
+    - [**🔄 Complete Workflow Pipeline**](#-complete-workflow-pipeline)
+    - [**⚡ Developer Experience**](#-developer-experience)
+    - [**🏢 Enterprise Ready**](#-enterprise-ready)
+  - [📋 **Prerequisites**](#-prerequisites)
+  - [⚙️ **Setup**](#️-setup)
+  - [🚀 **Quick Start Guide**](#-quick-start-guide)
+    - [**1. Start the Agentic AI Coding Assistant**](#1-start-the-agentic-ai-coding-assistant)
+    - [**2. Process Your Codebase**](#2-process-your-codebase)
+    - [**3. Use the Coding Assistant**](#3-use-the-coding-assistant)
+      - [**Option A: Use the Client SDK**](#option-a-use-the-client-sdk)
+      - [**Option B: Use the REST API Directly**](#option-b-use-the-rest-api-directly)
+      - [**Option C: Try the Interactive Demo**](#option-c-try-the-interactive-demo)
+  - [📖 **Detailed Usage Guide**](#-detailed-usage-guide)
+    - [**Data Extraction and Embedding**](#data-extraction-and-embedding)
       - [Complete Azure Search Pipeline](#complete-azure-search-pipeline)
       - [Individual Pipeline Steps](#individual-pipeline-steps)
       - [Setup the index schema.](#setup-the-index-schema)
     - [Running the Complete Pipeline](#running-the-complete-pipeline)
-    - [Run the agentic RAG system API](#run-the-agentic-rag-system-api)
+    - [**Agentic AI API Usage**](#agentic-ai-api-usage)
+      - [**🎯 Ask Coding Questions** (`/api/v1/ask`)](#-ask-coding-questions-apiv1ask)
+      - [**💡 Code Completion** (`/api/v1/complete`)](#-code-completion-apiv1complete)
+      - [**📖 Code Explanation** (`/api/v1/explain`)](#-code-explanation-apiv1explain)
+      - [**🔍 Semantic Code Search** (`/api/v1/search`)](#-semantic-code-search-apiv1search)
+    - [**Integration Examples**](#integration-examples)
+      - [**VS Code Extension Integration**](#vs-code-extension-integration)
+      - [**CLI Tool Integration**](#cli-tool-integration)
+      - [**Jupyter Notebook Integration**](#jupyter-notebook-integration)
+    - [**Run the Legacy RAG System API**](#run-the-legacy-rag-system-api)
 
-## Project Structure
+## 🎯 **What You Get**
+
+This agentic AI coding assistant provides:
+
+### **💬 GitHub Copilot-like Experience**
+- **Ask any coding question** and get intelligent answers based on your company's codebase
+- **Code completion suggestions** that follow your team's patterns and conventions
+- **Code explanations** with references to similar implementations in your repositories
+- **Context-aware responses** that understand your project structure and dependencies
+
+### **🧠 Company-Specific Intelligence**
+- **Learns from YOUR codebase** patterns, not generic internet code
+- **Follows YOUR coding standards** and architectural decisions  
+- **Uses YOUR preferred libraries** and frameworks
+- **Understands YOUR team's conventions** and best practices
+
+### **🔍 Smart Code Discovery**
+- **Semantic search** that finds code by functionality, not just text
+- **Multi-language support** with deep code understanding
+- **Pattern recognition** for reusable code templates and configurations
+- **Intent-based retrieval** that understands what you're trying to accomplish
+
+### **⚡ Developer-Friendly API**
+- **REST API endpoints** for easy integration with any tool
+- **Real-time responses** with confidence scoring and source attribution
+- **Flexible deployment** options (standalone server, containerized, cloud)
+- **Comprehensive documentation** and examples
+
+## 🏗️ **Project Structure**
 
 ```
 DLS-404/
 ├── api/                          # API layer
 │   ├── __init__.py
-│   ├── knowledge_assistant_api.py # Knowledge assistant API
+│   ├── coding_assistant_api_server.py # 🤖 Agentic AI Coding Assistant server
 │   ├── router.py                 # API routing
 │   ├── requirements.txt          # API dependencies
 │   └── README.md                 # API documentation
-├── chainlit-frontend/            # Chainlit-based frontend
-│   ├── app.py                    # Main Chainlit application
-│   ├── enhanced_app.py           # Enhanced version with additional features
-│   ├── demo.py                   # Demo application
-│   ├── requirements.txt          # Frontend dependencies
-│   ├── Dockerfile                # Docker configuration
-│   ├── docker-compose.yml        # Docker compose setup
 ├── config/                       # Configuration management
 │   ├── config.py                 # Central configuration module
-│   ├── extractor_config.json     # Configuration for enabled extractors
-│   └── mcp_config.py             # MCP (Model Context Protocol) configuration
+│   └── extractor_config.json     # Configuration for enabled extractors
 ├── extractors/                   # Data extraction modules
 │   ├── __init__.py
+│   ├── enhanced_code_extractor.py # 🧠 Enhanced code extractor with AST analysis
 │   ├── gitlab_extractor.py       # Base GitLab extractor class
 │   ├── enhanced_issues_extractor.py # Enhanced issues and epics extractor
 │   ├── merge_requests_extractor.py # Merge requests extractor
@@ -56,33 +116,26 @@ DLS-404/
 │   └── code_extractor.py         # Repository code extractor
 ├── processors/                    # Data processing modules
 │   ├── __init__.py
+│   ├── semantic_code_chunker.py  # 🧠 Semantic code chunking with AST analysis
+│   ├── ast_parsers.py            # 🔍 Multi-language AST parsers  
+│   ├── template_pattern_extractor.py # 📋 Template and pattern extraction
+│   ├── enhanced_integration_manager.py # 🎛️ Central orchestration manager
 │   ├── improved_text_chunker.py  # Enhanced text chunking logic
 │   └── improved_code_chunker.py  # Enhanced code-specific chunking logic
 ├── storage/                       # Storage layer
 │   ├── __init__.py
-│   ├── blob_storage.py           # Azure Blob Storage integration
+│   └── blob_storage.py           # Azure Blob Storage integration
 ├── search/                        # Search functionality
 │   ├── __init__.py
+│   ├── intelligent_code_search.py # 🎯 Intelligent semantic code search
 │   ├── azure_search.py           # Azure AI Search integration
 │   └── enhanced_azure_search.py  # Enhanced search implementation
 ├── rag/                          # RAG (Retrieval-Augmented Generation) system
 │   ├── __init__.py
-│   └── agentic/                  # Agentic RAG components
+│   └── agentic/                  # Agentic AI components
 │       ├── __init__.py
-│       ├── epic_status_agent.py  # Epic status reporting agent
-│       ├── gitlab_auth.py        # GitLab authentication
-│       ├── gitlab_mcp_agent.py   # MCP-based GitLab agent
-│       ├── knowledge_assistant.py # Knowledge assistant implementation
-│       ├── mcp_connector.py      # MCP protocol connector
-│       ├── README.md             # Agentic RAG documentation
-│       └── plugins/              # Semantic plugins
-│           └── semantic/         # Semantic processing plugins
-│               ├── extract_info/ # Information extraction plugin
-│               │   ├── config.json
-│               │   └── skprompt.txt
-│               └── summarize/    # Summarization plugin
-│                   ├── config.json
-│                   └── skprompt.txt
+│       ├── coding_assistant_api.py # 🤖 Core Agentic AI Coding Assistant
+│       └── company_code_context.py # 🏢 Company-specific code context builder
 ├── tools/                         # Utility tools and scripts
 │   ├── configure_extractors.py   # Tool to enable/disable extractors
 │   ├── extraction_manager.py     # Extraction pipeline manager
@@ -90,44 +143,66 @@ DLS-404/
 │   └── templates/                # HTML templates
 │       └── index.html            # Main template
 ├── scripts/                       # Core scripts and utilities
+│   ├── coding_assistant_client_examples.py # 🤖 Agentic AI client examples
+│   ├── demo_enhanced_system.py   # 🎯 Enhanced system demo
 │   ├── create_azure_search_index.py # Index creation script
-│   ├── demo_epic_status_report.py # Demo for epic status reporting
 │   ├── initialize_pipeline.py    # Pipeline initialization
 │   ├── list_azure_search_resources.py # List Azure search resources
 │   ├── purge_and_reindex.py      # Purge and reindex functionality
 │   ├── quick_search_test.py      # Quick search testing
-│   ├── run_knowledge_assistant_api.py # Run knowledge assistant API
 │   ├── setup_azure_resources.py  # Azure resource setup
 │   └── verify_index.py           # Index verification utility
 ├── docs/                          # Documentation
 │   ├── agentic_rag_improvements.md # Agentic RAG system improvements
 │   ├── chunking_system.md        # Chunking system documentation
 │   ├── embedding_system.md       # Embedding system documentation
-│   ├── EPIC_STATUS_REPORT_AGENT.md # Epic status report agent docs
 │   ├── extractors.md             # Extractors documentation
-│   ├── gitlab_mcp_agent.md       # GitLab MCP agent documentation
-│   ├── knowledge_assistant.md    # Knowledge assistant documentation
 │   └── README.md                 # Documentation index
-├── postman/                       # API testing
-│   └── gitlab_rag_knowledge_assistant.postman_collection.json # Postman collection
-├── knowledge_assistant_main.py    # Main knowledge assistant entry point
+├── tests/                         # Test suite
+│   └── test_enhanced_functionality.py # 🧪 Enhanced system tests
+├── CODING_ASSISTANT_API.md        # 🤖 Agentic AI Coding Assistant documentation
 ├── pyproject.toml                # Project configuration
 └── requirements.txt               # Project dependencies
 ```
 
-## Features
+## ✨ **Features**
 
-- **Modular Architecture**: Each component is designed to be independent and extensible
-- **GitLab Data Integration**: Extract issues, merge requests, commits, and code from GitLab repositories
-- **Multi-Project Support**: Extract data from multiple projects and groups simultaneously
-- **Semantic Chunking**: Content-aware chunking for both text and code
-- **Azure Integration**: Leverages Azure OpenAI, Azure AI Search, and Azure Blob Storage
-- **Hybrid Search**: Combines vector and keyword search for better results
-- **Source Citations**: All answers include references to the original GitLab content
-- **Flexible Deployment**: Can be deployed as a web service or Azure Functions
-- **Agentic RAG**: Enhanced system that can take actions based on user queries
+### **🤖 Agentic AI Capabilities**
+- **Company-specific code intelligence** similar to GitHub Copilot but trained on your codebase
+- **Ask any coding question** and get intelligent answers based on your team's patterns
+- **Code completion suggestions** that follow your organization's conventions
+- **Code explanation and understanding** with references to similar company implementations
+- **Semantic code search** that finds functionality by intent, not just text matching
 
-## Prerequisites
+### **🧠 Advanced Code Understanding**  
+- **Multi-language AST analysis** (Python, TypeScript, Java, Go, Rust, and more)
+- **Semantic code chunking** with rich metadata and context preservation
+- **Pattern recognition** for reusable templates and configurations
+- **Company context intelligence** that learns your coding standards and practices
+- **Intent-based retrieval** that understands what developers are trying to accomplish
+
+### **🔄 Complete Workflow Pipeline**
+- **Extract**: Pull code and data from GitLab repositories with enhanced metadata
+- **Chunk**: Break code into semantically meaningful pieces with AST analysis
+- **Embed**: Generate high-quality vector embeddings for semantic search
+- **Retrieve**: Find relevant context using intelligent multi-modal search
+- **Generate**: Provide company-specific responses using LLM with retrieved context
+
+### **⚡ Developer Experience**
+- **REST API interface** for easy integration with any development tool
+- **Real-time responses** with confidence scoring and source attribution
+- **Comprehensive client SDK** with examples and interactive demos
+- **Flexible deployment** options (standalone, containerized, cloud)
+- **Modular architecture** where each component is independent and extensible
+
+### **🏢 Enterprise Ready**
+- **GitLab integration** with support for multiple projects and groups simultaneously
+- **Azure cloud services** leveraging OpenAI, AI Search, and Blob Storage
+- **Hybrid search** combining vector and keyword search for optimal results
+- **Source citations** with all answers referencing original GitLab content
+- **Security and compliance** considerations built into the architecture
+
+## 📋 **Prerequisites**
 
 - Python 3.8+
 - Azure Account with:
@@ -136,7 +211,7 @@ DLS-404/
   - Azure OpenAI Service
 - GitLab Account with API access
 
-## Setup
+## ⚙️ **Setup**
 
 1. Clone this repository
 2. Setup a virtual environment:
@@ -201,11 +276,111 @@ DLS-404/
      --openai-service-name gitlabrag-openai
    ```
 
-## Usage
+## 🚀 **Quick Start Guide**
 
-### Data Extraction and Indexing
+Get your agentic AI coding assistant up and running in minutes!
 
-The system supports extraction from various GitLab data sources and indexing to Azure Cognitive Search. Use the `initialize_pipeline.py` script for the complete pipeline.
+### **1. Start the Agentic AI Coding Assistant**
+
+```bash
+# Start the server
+python api/coding_assistant_api_server.py
+
+# Server will be available at http://localhost:5000
+# API documentation at http://localhost:5000/docs
+```
+
+### **2. Process Your Codebase** 
+
+First, process your GitLab repositories to create embeddings:
+
+```bash
+# Process a single project for quick testing
+python scripts/initialize_pipeline.py --all --project-id YOUR_PROJECT_ID
+
+# Process multiple projects for comprehensive coverage
+python scripts/initialize_pipeline.py --all --project-id "project1,project2,project3"
+
+# Process all projects in a group
+python scripts/initialize_pipeline.py --all --group-projects-id YOUR_GROUP_ID
+```
+
+This will:
+- **Extract** code from your GitLab repositories
+- **Chunk** code into semantic pieces with AST analysis  
+- **Embed** chunks using vector embeddings
+- **Index** everything for fast semantic search
+
+### **3. Use the Coding Assistant**
+
+#### **Option A: Use the Client SDK**
+
+```python
+from scripts.coding_assistant_client_examples import CodingAssistantClient
+
+# Initialize client
+client = CodingAssistantClient()
+
+# Ask any coding question
+result = client.ask_coding_question(
+    "How do I implement user authentication following our company's patterns?",
+    context={"language": "python", "framework": "flask"},
+    task_type="code_generation"
+)
+
+print(result['answer'])  # Get AI response based on your company's code
+
+# Complete partial code
+completion = client.complete_code(
+    "def authenticate_user(username, password):\n    # Complete this",
+    file_context={"language": "python", "imports": ["bcrypt", "jwt"]}
+)
+
+print(completion['suggestions'][0])  # Get code completion
+```
+
+#### **Option B: Use the REST API Directly**
+
+```python
+import requests
+
+# Ask coding questions
+response = requests.post("http://localhost:5000/api/v1/ask", json={
+    "query": "Show me how to implement rate limiting in our APIs",
+    "context": {"language": "python", "framework": "flask"},
+    "task_type": "code_generation"
+})
+
+result = response.json()
+print(result['answer'])
+
+# Search for code patterns
+response = requests.post("http://localhost:5000/api/v1/search", json={
+    "query": "authentication with JWT tokens",
+    "intent": "code_example",
+    "language": "python"
+})
+
+search_results = response.json()
+for result in search_results['results']:
+    print(f"Found: {result['explanation']}")
+```
+
+#### **Option C: Try the Interactive Demo**
+
+```bash
+# Run interactive examples
+python scripts/coding_assistant_client_examples.py
+
+# Try interactive mode
+python scripts/coding_assistant_client_examples.py --interactive
+```
+
+## 📖 **Detailed Usage Guide**
+
+### **Data Extraction and Embedding**
+
+The system supports extraction from various GitLab data sources with enhanced semantic understanding:
 
 #### Complete Azure Search Pipeline
 
@@ -274,9 +449,100 @@ python scripts/initialize_pipeline.py --all --group-id "group_id_1,group_id_2"
 python scripts/initialize_pipeline.py --all --no-commits
 ```
 
-### Run the agentic RAG system API
+### **Agentic AI API Usage**
+
+The core agentic AI coding assistant provides several key endpoints:
+
+#### **🎯 Ask Coding Questions** (`/api/v1/ask`)
+```python
+# Ask any coding question - like GitHub Copilot Chat
+POST /api/v1/ask
+{
+    "query": "How do I implement retry logic for database connections?",
+    "context": {"language": "python", "framework": "sqlalchemy"},
+    "task_type": "code_generation"
+}
+```
+
+#### **💡 Code Completion** (`/api/v1/complete`)
+```python
+# Get code completion suggestions - like GitHub Copilot inline
+POST /api/v1/complete
+{
+    "partial_code": "def retry_connection(func):\n    # Add retry logic",
+    "file_context": {"language": "python", "imports": ["time", "random"]}
+}
+```
+
+#### **📖 Code Explanation** (`/api/v1/explain`)
+```python
+# Explain code functionality with company context
+POST /api/v1/explain
+{
+    "code": "@retry(max_attempts=3)\ndef connect_db():\n    return engine.connect()",
+    "context": {"language": "python"}
+}
+```
+
+#### **🔍 Semantic Code Search** (`/api/v1/search`)
+```python
+# Find code by functionality, not just text
+POST /api/v1/search
+{
+    "query": "database connection pooling with error handling",
+    "intent": "code_example",
+    "language": "python"
+}
+```
+
+### **Integration Examples**
+
+#### **VS Code Extension Integration**
+```javascript
+// Example VS Code extension integration
+const response = await fetch('http://localhost:5000/api/v1/complete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+        partial_code: editor.getTextInRange(selection),
+        file_context: {
+            language: document.languageId,
+            file_path: document.fileName,
+            imports: extractImports(document.getText())
+        }
+    })
+});
+
+const suggestions = await response.json();
+// Show suggestions in VS Code
+```
+
+#### **CLI Tool Integration**
+```bash
+# Create a simple CLI wrapper
+curl -X POST "http://localhost:5000/api/v1/ask" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How do I implement caching in our Flask apps?",
+    "context": {"language": "python", "framework": "flask"},
+    "task_type": "code_generation"
+  }'
+```
+
+#### **Jupyter Notebook Integration**
+```python
+# Magic command for Jupyter
+%load_ext coding_assistant_magic
+
+# Ask questions directly in notebooks
+%%ask_coding_question
+How do I optimize this pandas operation for large datasets?
+```
+
+### **Run the Legacy RAG System API**
 
 ```bash
+# For legacy knowledge assistant functionality
 python api/knowledge_assistant_api.py
 ```
 

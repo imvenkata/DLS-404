@@ -1,38 +1,24 @@
 """
-RAG package for retrieval-augmented generation pipeline.
-This package focuses on the agentic RAG implementation using Semantic Kernel.
+RAG package for agentic AI coding assistant.
+This package focuses on the coding assistant implementation.
 """
 
 # Import modules with graceful error handling
 __all__ = []
 
 try:
-    from .agentic.knowledge_assistant import KnowledgeAssistant
-    __all__.append('KnowledgeAssistant')
+    from .agentic.coding_assistant_api import CodingAssistantAPI
+    __all__.append('CodingAssistantAPI')
 except ImportError as e:
     import logging
-    logging.warning(f"Could not import KnowledgeAssistant: {str(e)}")
+    logging.warning(f"Could not import CodingAssistantAPI: {str(e)}")
 
 try:
-    from .agentic.gitlab_enhanced import GitLabEnhancedActions
-    __all__.extend(['GitLabEnhancedActions'])
+    from .agentic.company_code_context import CompanyCodeGenerationContext
+    __all__.append('CompanyCodeGenerationContext')
 except ImportError as e:
     import logging
-    logging.warning(f"Could not import GitLabEnhancedActions: {str(e)}")
-
-try:
-    from .agentic.gitlab_issue_agent import GitLabIssueAgent
-    __all__.append('GitLabIssueAgent')
-except ImportError as e:
-    import logging
-    logging.warning(f"Could not import GitLabIssueAgent: {str(e)}")
-
-try:
-    from .agentic.epic_status_agent import EpicStatusReportAgent
-    __all__.append('EpicStatusReportAgent')
-except ImportError as e:
-    import logging
-    logging.warning(f"Could not import EpicStatusReportAgent: {str(e)}")
+    logging.warning(f"Could not import CompanyCodeGenerationContext: {str(e)}")
 
 # Ensure we have at least an empty list
 if not __all__:

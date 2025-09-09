@@ -43,14 +43,34 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def load_extractor_config():
+    """Load extractor configuration from config file."""
+    config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "extractor_config.json")
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        logger.info(f"Loaded extractor configuration from {config_path}")
+        return config
+    except Exception as e:
+        logger.warning(f"Could not load extractor config from {config_path}: {e}. Using defaults.")
+        return {
+            "extractors": {
+                "issues": False,
+                "merge_requests": False,
+                "commits": False,
+                "code": True,
+                "epics": False
+            }
+        }
+
 def extract_data(project_ids: Union[str, List[str]], 
                 group_ids: Union[str, List[str]] = None,
                 group_projects_ids: Union[str, List[str]] = None,
-                extract_issues: bool = True, 
-                extract_merge_requests: bool = True, 
-                extract_commits: bool = False, # Set to False by default to exclude commits
-                extract_code: bool = True, 
-                extract_epics: bool = True):
+                extract_issues: bool = None, 
+                extract_merge_requests: bool = None, 
+                extract_commits: bool = None,
+                extract_code: bool = None, 
+                extract_epics: bool = None):
     """
     Extract data from GitLab.
     
@@ -58,15 +78,33 @@ def extract_data(project_ids: Union[str, List[str]],
         project_ids: GitLab project IDs (string or list)
         group_ids: Optional GitLab group IDs for epics (string or list)
         group_projects_ids: Optional GitLab group IDs to extract all projects from (string or list)
-        extract_issues: Whether to extract issues
-        extract_merge_requests: Whether to extract merge requests
-        extract_commits: Whether to extract commits
-        extract_code: Whether to extract repository code
-        extract_epics: Whether to extract epics
+        extract_issues: Whether to extract issues (None = use config)
+        extract_merge_requests: Whether to extract merge requests (None = use config)
+        extract_commits: Whether to extract commits (None = use config)
+        extract_code: Whether to extract repository code (None = use config)
+        extract_epics: Whether to extract epics (None = use config)
         
     Returns:
         Dictionary of extracted data
     """
+    # Load configuration and apply defaults if parameters are None
+    config = load_extractor_config()
+    extractors_config = config.get("extractors", {})
+    
+    if extract_issues is None:
+        extract_issues = extractors_config.get("issues", False)
+    if extract_merge_requests is None:
+        extract_merge_requests = extractors_config.get("merge_requests", False)
+    if extract_commits is None:
+        extract_commits = extractors_config.get("commits", False)
+    if extract_code is None:
+        extract_code = extractors_config.get("code", True)
+    if extract_epics is None:
+        extract_epics = extractors_config.get("epics", False)
+    
+    logger.info(f"Extraction settings: issues={extract_issues}, merge_requests={extract_merge_requests}, "
+                f"commits={extract_commits}, code={extract_code}, epics={extract_epics}")
+    
     # Initialize storage
     blob_storage = BlobStorage()
     
@@ -630,7 +668,11 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
         except Exception as e: logger.error(f"Error listing or processing code files for project {project_id}: {str(e)}")
 
     # Process epics from specified groups (individual JSONs from raw_data)
-    if group_ids:
+    # Check if epic processing is enabled in config
+    config = load_extractor_config()
+    epic_processing_enabled = config.get("extractors", {}).get("epics", False)
+    
+    if group_ids and epic_processing_enabled:
         for group_id in group_ids:
             logger.info(f"--- Processing epic data for group {group_id} ---")
             try:
@@ -663,6 +705,8 @@ def chunk_and_embed_data(project_ids: Union[str, List[str]], group_ids: Union[st
                                 all_successfully_embedded_chunks_master.extend(embedded_chunks)
                         else: logger.warning(f"Skipping epic blob {blob_name}: invalid data format or missing metadata.")
             except Exception as e: logger.error(f"Error listing or processing epics for group {group_id}: {str(e)}")
+    elif group_ids and not epic_processing_enabled:
+        logger.info(f"Epic processing is disabled in configuration. Skipping {len(group_ids)} groups for epic processing.")
 
     if not all_successfully_embedded_chunks_master:
         logger.info("Pipeline finished. No items were successfully processed to generate embedded chunks.")

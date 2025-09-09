@@ -71,6 +71,59 @@ CODE_CHUNK_OVERLAP = int(os.getenv("CODE_CHUNK_OVERLAP", "150"))
 TEXT_FILE_EXTENSIONS = [".md", ".txt", ".rst"]
 CODE_FILE_EXTENSIONS = [".py", ".js", ".java", ".cs", ".html", ".css", ".json", ".yml", ".yaml"]
 
+# Enhanced code analysis extensions
+EXTENDED_CODE_EXTENSIONS = CODE_FILE_EXTENSIONS + [
+    '.ts', '.tsx', '.jsx', '.vue', '.go', '.rs', '.rb', '.php',
+    '.swift', '.kt', '.scala', '.sh', '.bash', '.sql', '.graphql',
+    '.dockerfile', '.tf', '.tfvars', '.toml', '.ini', '.cfg', '.conf'
+]
+
+# AST Parser Configuration
+AST_PARSER_ENABLED = os.getenv("AST_PARSER_ENABLED", "True").lower() == "true"
+AST_PARSER_TIMEOUT = int(os.getenv("AST_PARSER_TIMEOUT", "30"))  # seconds
+
+# Semantic Analysis Configuration
+SEMANTIC_ANALYSIS_ENABLED = os.getenv("SEMANTIC_ANALYSIS_ENABLED", "True").lower() == "true"
+DEPENDENCY_ANALYSIS_ENABLED = os.getenv("DEPENDENCY_ANALYSIS_ENABLED", "True").lower() == "true"
+PATTERN_ANALYSIS_ENABLED = os.getenv("PATTERN_ANALYSIS_ENABLED", "True").lower() == "true"
+
+# Template Pattern Extraction Configuration
+TEMPLATE_EXTRACTION_ENABLED = os.getenv("TEMPLATE_EXTRACTION_ENABLED", "True").lower() == "true"
+PATTERN_SIMILARITY_THRESHOLD = float(os.getenv("PATTERN_SIMILARITY_THRESHOLD", "0.7"))
+PATTERN_REUSABILITY_THRESHOLD = float(os.getenv("PATTERN_REUSABILITY_THRESHOLD", "0.5"))
+
+# Intelligent Search Configuration
+INTELLIGENT_SEARCH_ENABLED = os.getenv("INTELLIGENT_SEARCH_ENABLED", "True").lower() == "true"
+MULTI_MODAL_SEARCH_ENABLED = os.getenv("MULTI_MODAL_SEARCH_ENABLED", "True").lower() == "true"
+SEARCH_RESULT_LIMIT = int(os.getenv("SEARCH_RESULT_LIMIT", "10"))
+SEARCH_CONFIDENCE_THRESHOLD = float(os.getenv("SEARCH_CONFIDENCE_THRESHOLD", "0.6"))
+
+# Company Context Configuration
+COMPANY_CONTEXT_ENABLED = os.getenv("COMPANY_CONTEXT_ENABLED", "True").lower() == "true"
+CODING_STANDARDS_EXTRACTION = os.getenv("CODING_STANDARDS_EXTRACTION", "True").lower() == "true"
+TEAM_PREFERENCES_ANALYSIS = os.getenv("TEAM_PREFERENCES_ANALYSIS", "True").lower() == "true"
+ARCHITECTURE_PATTERN_DETECTION = os.getenv("ARCHITECTURE_PATTERN_DETECTION", "True").lower() == "true"
+
+# Security Analysis Configuration
+SECURITY_ANALYSIS_ENABLED = os.getenv("SECURITY_ANALYSIS_ENABLED", "True").lower() == "true"
+SENSITIVE_DATA_DETECTION = os.getenv("SENSITIVE_DATA_DETECTION", "True").lower() == "true"
+VULNERABILITY_SCANNING = os.getenv("VULNERABILITY_SCANNING", "True").lower() == "true"
+
+# Performance Configuration
+PARALLEL_PROCESSING_ENABLED = os.getenv("PARALLEL_PROCESSING_ENABLED", "True").lower() == "true"
+MAX_WORKER_THREADS = int(os.getenv("MAX_WORKER_THREADS", "5"))
+INCREMENTAL_INDEXING_ENABLED = os.getenv("INCREMENTAL_INDEXING_ENABLED", "True").lower() == "true"
+
+# Quality Metrics Configuration
+CODE_QUALITY_ANALYSIS = os.getenv("CODE_QUALITY_ANALYSIS", "True").lower() == "true"
+COMPLEXITY_ANALYSIS_ENABLED = os.getenv("COMPLEXITY_ANALYSIS_ENABLED", "True").lower() == "true"
+DOCUMENTATION_ANALYSIS = os.getenv("DOCUMENTATION_ANALYSIS", "True").lower() == "true"
+
+# Enterprise Features Configuration
+MULTI_REPOSITORY_SUPPORT = os.getenv("MULTI_REPOSITORY_SUPPORT", "True").lower() == "true"
+CROSS_REPO_DEPENDENCY_ANALYSIS = os.getenv("CROSS_REPO_DEPENDENCY_ANALYSIS", "True").lower() == "true"
+ORGANIZATION_WIDE_PATTERNS = os.getenv("ORGANIZATION_WIDE_PATTERNS", "True").lower() == "true"
+
 # Extraction Configuration
 MAX_ITEMS_PER_PAGE = int(os.getenv("MAX_ITEMS_PER_PAGE", "100"))
 EXTRACT_EPICS = os.getenv("EXTRACT_EPICS", "True").lower() == "true"
